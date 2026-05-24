@@ -1,0 +1,8 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - heading "独立聊天页" [level=1] [ref=e5]
+    - paragraph [ref=e6]: 共享 chatbot 配置快照的独立访客入口。
+  - generic [ref=e8]: 你好，这里是机器人欢迎语占位。
+  - generic [ref=e9]:
+    - textbox "输入访客问题" [ref=e10]
+    - button "发送" [ref=e11]

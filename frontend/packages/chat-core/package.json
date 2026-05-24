@@ -1,0 +1,18 @@
+{
+  "name": "@agentx/chat-core",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.tsx",
+  "types": "./src/index.tsx",
+  "scripts": {
+    "lint": "eslint src --ext .ts,.tsx",
+    "format": "prettier --write src",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "react": "^19.1.0"
+  }
+}

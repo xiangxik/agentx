@@ -1,0 +1,8 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - heading "网站插件" [level=1] [ref=e5]
+    - paragraph [ref=e6]: 后续会通过嵌入脚本 + 域名白名单初始化。
+  - generic [ref=e8]: 你好，我是你的专属客服机器人。请告诉我你的问题。
+  - generic [ref=e9]:
+    - textbox "输入访客问题" [ref=e10]
+    - button "发送" [ref=e11]

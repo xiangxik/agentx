@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+.DS_Store
+.idea/
+.vscode/
+*.log
+frontend/apps/*/dist/
+frontend/packages/*/dist/
+backend/target/
+backend/.mvn/
+.env.local
+.env.*.local
+storage/
+.env

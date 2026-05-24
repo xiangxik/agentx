@@ -1,0 +1,51 @@
+spring:
+  application:
+    name: agentx-backend
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:agentx}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  servlet:
+    multipart:
+      max-file-size: ${MAX_UPLOAD_SIZE_MB:10}MB
+      max-request-size: ${MAX_UPLOAD_SIZE_MB:10}MB
+
+server:
+  port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+agentx:
+  bootstrap:
+    super-admin:
+      email: ${BOOTSTRAP_SUPER_ADMIN_EMAIL:admin@agentx.local}
+      password: ${BOOTSTRAP_SUPER_ADMIN_PASSWORD:Admin123!}
+      display-name: ${BOOTSTRAP_SUPER_ADMIN_DISPLAY_NAME:Platform Admin}
+  files:
+    root: ${FILES_ROOT:./storage/files}
+  jwt:
+    issuer: ${JWT_ISSUER:agentx}
+    secret: ${JWT_SECRET:change-me}
+    expiration-minutes: ${JWT_EXPIRATION_MINUTES:120}
+  crawl:
+    min-interval-minutes: ${WEB_CRAWL_MIN_INTERVAL_MINUTES:60}
+  conversation:
+    retention-days: ${CONVERSATION_RETENTION_DAYS:365}
+  feature:
+    streaming-enabled: ${CHAT_STREAMING_ENABLED:false}
+    moderation-enabled: ${CONTENT_MODERATION_ENABLED:false}
+    custom-chat-domain-enabled: ${CUSTOM_CHAT_DOMAIN_ENABLED:false}

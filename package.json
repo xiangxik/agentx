@@ -1,0 +1,46 @@
+{
+  "name": "agentx",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "frontend/apps/*",
+    "frontend/packages/*"
+  ],
+  "scripts": {
+    "dev:tenant-admin": "npm run dev --workspace @agentx/tenant-admin",
+    "dev:super-admin": "npm run dev --workspace @agentx/super-admin",
+    "dev:chat-page": "npm run dev --workspace @agentx/chat-page",
+    "dev:chatbot-widget": "npm run dev --workspace @agentx/chatbot-widget",
+    "format": "npm run format --workspaces --if-present && npm run format:backend",
+    "format:backend": "JAVA_HOME=\"${JAVA_HOME:-/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home}\" PATH=\"$JAVA_HOME/bin:$PATH\" mvn -f backend/pom.xml spotless:apply",
+    "lint": "npm run lint --workspaces --if-present && npm run lint:backend",
+    "lint:backend": "JAVA_HOME=\"${JAVA_HOME:-/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home}\" PATH=\"$JAVA_HOME/bin:$PATH\" mvn -f backend/pom.xml spotless:check",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present && npm run test:backend",
+    "test:backend": "JAVA_HOME=\"${JAVA_HOME:-/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home}\" PATH=\"$JAVA_HOME/bin:$PATH\" mvn -f backend/pom.xml test",
+    "build": "npm run build --workspaces --if-present && npm run build:backend",
+    "build:backend": "JAVA_HOME=\"${JAVA_HOME:-/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home}\" PATH=\"$JAVA_HOME/bin:$PATH\" mvn -f backend/pom.xml -DskipTests package",
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "docker:up": "docker compose -f deploy/docker-compose.yml up -d --build",
+    "docker:down": "docker compose -f deploy/docker-compose.yml down"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.29.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^24.0.3",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.5.2",
+    "eslint": "^9.29.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^16.2.0",
+    "jsdom": "^26.1.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.35.1",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.4"
+  }
+}
