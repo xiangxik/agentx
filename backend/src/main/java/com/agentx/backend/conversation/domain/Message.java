@@ -92,4 +92,8 @@ public class Message {
   public void setMetadataJson(String metadataJson) {
     this.metadataJson = metadataJson;
   }
+
+  public Instant getCreatedAt() {
+    return createdAt;
+  }
 }

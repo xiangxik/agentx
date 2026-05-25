@@ -5,7 +5,7 @@
 ## 技术栈
 
 - 前端：React + TypeScript + Vite + npm workspaces
-- 后端：Java 21 + Spring Boot + Maven
+- 后端：Java 25 + Spring Boot + Maven
 - 数据库：PostgreSQL + pgvector
 - 部署：Docker Compose + Nginx
 
@@ -46,12 +46,10 @@ doc/                      需求与设计文档
 4. 启动后端
 
    ```bash
-   export JAVA_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"
+   export JAVA_HOME="/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home"
    export PATH="$JAVA_HOME/bin:/opt/homebrew/bin:$PATH"
    mvn -f backend/pom.xml spring-boot:run
    ```
-
-   本地默认 `dev` 配置使用 H2 文件数据库，Docker 部署仍使用 PostgreSQL/pgvector。
 
 ## 统一命令
 

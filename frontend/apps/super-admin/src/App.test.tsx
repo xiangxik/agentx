@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { App } from './App';
 
 describe('super-admin app', () => {
-  it('renders shell title', () => {
+  it('renders login page by default', () => {
     render(<App />);
-    expect(screen.getByText('Super Admin')).toBeInTheDocument();
+    expect(screen.getByText('登录平台管理台')).toBeInTheDocument();
   });
 });

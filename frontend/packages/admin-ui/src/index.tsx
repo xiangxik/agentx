@@ -1,11 +1,17 @@
 import type { PropsWithChildren, ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 
-export function AdminShell({ title, nav, children }: PropsWithChildren<{ title: string; nav: Array<{ to: string; label: string }> }>) {
+export function AdminShell({
+  title,
+  nav,
+  actions,
+  children
+}: PropsWithChildren<{ title: string; nav: Array<{ to: string; label: string }>; actions?: ReactNode }>) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', minHeight: '100vh', fontFamily: 'sans-serif' }}>
       <aside style={{ padding: 24, background: '#111827', color: '#fff' }}>
         <h1 style={{ marginTop: 0 }}>{title}</h1>
+        {actions ? <div style={{ marginBottom: 24 }}>{actions}</div> : null}
         <nav style={{ display: 'grid', gap: 12 }}>
           {nav.map((item) => (
             <NavLink

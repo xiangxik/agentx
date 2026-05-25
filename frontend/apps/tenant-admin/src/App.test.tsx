@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { App } from './App';
 
 describe('tenant-admin app', () => {
-  it('renders dashboard shell', () => {
+  it('renders login page by default', () => {
     render(<App />);
-    expect(screen.getByText('Tenant Admin')).toBeInTheDocument();
+    expect(screen.getByText('登录租户管理台')).toBeInTheDocument();
   });
 });

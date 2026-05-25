@@ -4,6 +4,8 @@ export interface ChatMessage {
   id: string;
   role: 'visitor' | 'assistant';
   content: string;
+  sourceType?: string;
+  citations?: Array<{ sourceId: number; title: string; sourceType: string; sourceLink?: string | null }>;
 }
 
 interface ChatSurfaceProps {
@@ -25,10 +27,27 @@ interface SendResponse {
   assistantMessageId: number;
   answer: string;
   sourceType: string;
-  citations: Array<{ sourceId: number; title: string; sourceType: string }>;
+  citations: Array<{ sourceId: number; title: string; sourceType: string; sourceLink?: string | null }>;
+}
+
+interface ApiErrorResponse {
+  code?: string;
 }
 
 const resolveApiBaseUrl = () => (globalThis as typeof globalThis & { __AGENTX_API_BASE_URL__?: string }).__AGENTX_API_BASE_URL__ ?? 'http://localhost:8080';
+
+function mapChatError(code: string | undefined, fallback: string) {
+  switch (code) {
+    case 'CONVERSATIONS_LIMIT_REACHED':
+      return '当前租户的会话额度已达上限，暂时无法创建新会话。';
+    case 'MESSAGES_LIMIT_REACHED':
+      return '当前租户的消息额度已达上限，暂时无法继续发送。';
+    case 'CHATBOT_NOT_ACTIVE':
+      return '当前 Chatbot 未启用，暂时无法对外提供服务。';
+    default:
+      return fallback;
+  }
+}
 
 export function ChatSurface({ title, subtitle, chatbotPublicCode, entryType }: ChatSurfaceProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -65,7 +84,10 @@ export function ChatSurface({ title, subtitle, chatbotPublicCode, entryType }: C
         });
 
         if (!response.ok) {
-          throw new Error(`Failed to initialize conversation: ${response.status}`);
+          const responseBody = (await response.json().catch(() => null)) as ApiErrorResponse | null;
+          throw new Error(
+            mapChatError(responseBody?.code, `Failed to initialize conversation: ${response.status}`)
+          );
         }
 
         const payload = (await response.json()) as InitResponse;
@@ -130,7 +152,35 @@ export function ChatSurface({ title, subtitle, chatbotPublicCode, entryType }: C
               maxWidth: '75%'
             }}
           >
-            {message.content}
+            <div>{message.content}</div>
+            {message.role === 'assistant' && message.citations && message.citations.length > 0 ? (
+              <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
+                <div style={{ fontSize: 12, color: '#64748b' }}>引用来源</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {message.citations.map((citation) => (
+                    <a
+                      key={`${message.id}-${citation.sourceType}-${citation.sourceId}`}
+                      href={citation.sourceLink ?? undefined}
+                      target={citation.sourceLink ? '_blank' : undefined}
+                      rel={citation.sourceLink ? 'noreferrer' : undefined}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        borderRadius: 999,
+                        background: '#e2e8f0',
+                        color: '#0f172a',
+                        fontSize: 12,
+                        padding: '4px 10px',
+                        textDecoration: 'none',
+                        cursor: citation.sourceLink ? 'pointer' : 'default'
+                      }}
+                    >
+                      {citation.sourceType === 'KNOWLEDGE' ? '知识库' : citation.sourceType}: {citation.title}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         ))}
       </section>
@@ -161,14 +211,21 @@ export function ChatSurface({ title, subtitle, chatbotPublicCode, entryType }: C
           })
             .then(async (response) => {
               if (!response.ok) {
-                throw new Error(`Failed to send message: ${response.status}`);
+                const responseBody = (await response.json().catch(() => null)) as ApiErrorResponse | null;
+                throw new Error(mapChatError(responseBody?.code, `Failed to send message: ${response.status}`));
               }
               return (await response.json()) as SendResponse;
             })
             .then((payload) => {
               setMessages((current) => [
                 ...current,
-                { id: String(payload.assistantMessageId), role: 'assistant', content: payload.answer }
+                {
+                  id: String(payload.assistantMessageId),
+                  role: 'assistant',
+                  content: payload.answer,
+                  sourceType: payload.sourceType,
+                  citations: payload.citations
+                }
               ]);
             })
             .catch((sendError: unknown) => {

@@ -2,11 +2,13 @@ package com.agentx.backend.plan.api;
 
 import com.agentx.backend.common.security.SecurityUtils;
 import com.agentx.backend.plan.application.PlanService;
+import com.agentx.backend.plan.domain.PlanStatus;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
 import java.util.Map;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -36,6 +38,22 @@ public class PlanAdminController {
         new PlanService.CreatePlanRequest(request.code(), request.name(), request.limits()));
   }
 
+  @PatchMapping("/{planId}")
+  public PlanService.PlanSummary update(
+      @PathVariable Long planId, @RequestBody UpdatePlanRequest request) {
+    return planService.update(
+        SecurityUtils.currentUser(),
+        planId,
+        new PlanService.UpdatePlanRequest(request.name(), request.limits()));
+  }
+
+  @PatchMapping("/{planId}/status")
+  public PlanService.PlanSummary updateStatus(
+      @PathVariable Long planId, @RequestBody UpdateStatusRequest request) {
+    return planService.updateStatus(
+        SecurityUtils.currentUser(), planId, PlanStatus.valueOf(request.status()));
+  }
+
   @PostMapping("/assignments")
   public PlanService.TenantQuotaSummary assign(@RequestBody AssignPlanRequest request) {
     return planService.assign(
@@ -52,5 +70,9 @@ public class PlanAdminController {
   public record CreatePlanRequest(
       @NotBlank String code, @NotBlank String name, Map<String, Long> limits) {}
 
+  public record UpdatePlanRequest(@NotBlank String name, Map<String, Long> limits) {}
+
   public record AssignPlanRequest(Long tenantId, Long planId, Map<String, Long> overrides) {}
+
+  public record UpdateStatusRequest(@NotBlank String status) {}
 }

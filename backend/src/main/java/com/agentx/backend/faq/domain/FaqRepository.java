@@ -7,4 +7,6 @@ public interface FaqRepository extends JpaRepository<Faq, Long> {
   List<Faq> findByTenantIdAndChatbotId(Long tenantId, Long chatbotId);
 
   List<Faq> findByTenantIdAndChatbotIdAndStatus(Long tenantId, Long chatbotId, FaqStatus status);
+
+  java.util.Optional<Faq> findByIdAndTenantId(Long id, Long tenantId);
 }

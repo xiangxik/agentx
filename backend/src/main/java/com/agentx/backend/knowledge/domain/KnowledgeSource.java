@@ -1,4 +1,4 @@
-package com.agentx.backend.conversation.domain;
+package com.agentx.backend.knowledge.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -11,8 +11,8 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 
 @Entity
-@Table(name = "conversation")
-public class Conversation {
+@Table(name = "knowledge_source")
+public class KnowledgeSource {
 
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -24,18 +24,25 @@ public class Conversation {
   @Column(name = "chatbot_id", nullable = false)
   private Long chatbotId;
 
-  @Column(name = "anonymous_visitor_id", nullable = false)
-  private String anonymousVisitorId;
-
-  @Column(name = "entry_type", nullable = false)
-  private String entryType;
+  @Enumerated(EnumType.STRING)
+  @Column(name = "source_type", nullable = false)
+  private KnowledgeSourceType sourceType;
 
   @Enumerated(EnumType.STRING)
   @Column(nullable = false)
-  private ConversationStatus status = ConversationStatus.ACTIVE;
+  private KnowledgeSourceStatus status = KnowledgeSourceStatus.UPLOADED;
+
+  @Column(name = "source_name", nullable = false)
+  private String sourceName;
+
+  @Column(name = "source_uri")
+  private String sourceUri;
 
   @Column(name = "metadata_json", nullable = false)
   private String metadataJson;
+
+  @Column(name = "failure_reason")
+  private String failureReason;
 
   @Column(name = "created_at", nullable = false)
   private Instant createdAt = Instant.now();
@@ -63,28 +70,36 @@ public class Conversation {
     this.chatbotId = chatbotId;
   }
 
-  public String getAnonymousVisitorId() {
-    return anonymousVisitorId;
+  public KnowledgeSourceType getSourceType() {
+    return sourceType;
   }
 
-  public void setAnonymousVisitorId(String anonymousVisitorId) {
-    this.anonymousVisitorId = anonymousVisitorId;
+  public void setSourceType(KnowledgeSourceType sourceType) {
+    this.sourceType = sourceType;
   }
 
-  public String getEntryType() {
-    return entryType;
-  }
-
-  public void setEntryType(String entryType) {
-    this.entryType = entryType;
-  }
-
-  public ConversationStatus getStatus() {
+  public KnowledgeSourceStatus getStatus() {
     return status;
   }
 
-  public void setStatus(ConversationStatus status) {
+  public void setStatus(KnowledgeSourceStatus status) {
     this.status = status;
+  }
+
+  public String getSourceName() {
+    return sourceName;
+  }
+
+  public void setSourceName(String sourceName) {
+    this.sourceName = sourceName;
+  }
+
+  public String getSourceUri() {
+    return sourceUri;
+  }
+
+  public void setSourceUri(String sourceUri) {
+    this.sourceUri = sourceUri;
   }
 
   public String getMetadataJson() {
@@ -95,11 +110,23 @@ public class Conversation {
     this.metadataJson = metadataJson;
   }
 
+  public String getFailureReason() {
+    return failureReason;
+  }
+
+  public void setFailureReason(String failureReason) {
+    this.failureReason = failureReason;
+  }
+
   public Instant getCreatedAt() {
     return createdAt;
   }
 
   public Instant getUpdatedAt() {
     return updatedAt;
+  }
+
+  public void setUpdatedAt(Instant updatedAt) {
+    this.updatedAt = updatedAt;
   }
 }

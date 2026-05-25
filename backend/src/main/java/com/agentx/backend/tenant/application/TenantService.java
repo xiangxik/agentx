@@ -102,6 +102,53 @@ public class TenantService {
         .toList();
   }
 
+    @Transactional(readOnly = true)
+    public TenantDetail get(Long tenantId) {
+        Tenant tenant = tenantRepository.findById(tenantId).orElseThrow();
+        AppUser admin = appUserRepository.findFirstByTenantId(tenantId).orElse(null);
+
+        return new TenantDetail(
+                tenant.getId(),
+                tenant.getCode(),
+                tenant.getName(),
+                tenant.getStatus().name(),
+                tenant.getContactName(),
+                tenant.getContactEmail(),
+                tenant.getNotes(),
+                admin == null ? null : new TenantAdminSummary(admin.getId(), admin.getEmail(), admin.getDisplayName()));
+    }
+
+    @Transactional
+    public TenantDetail update(CurrentUser actor, Long tenantId, UpdateTenantRequest request) {
+        Tenant tenant = tenantRepository.findById(tenantId).orElseThrow();
+        tenant.setName(request.name());
+        tenant.setContactName(request.contactName());
+        tenant.setContactEmail(request.contactEmail());
+        tenant.setNotes(request.notes());
+
+        auditLogService.record(
+                tenant.getId(),
+                actor.userId(),
+                "TENANT_UPDATED",
+                "TENANT",
+                String.valueOf(tenantId),
+                "SUCCESS",
+                "LOW",
+                Map.of("name", tenant.getName(), "contactEmail", String.valueOf(tenant.getContactEmail())));
+
+        AppUser admin = appUserRepository.findFirstByTenantId(tenantId).orElse(null);
+
+        return new TenantDetail(
+                tenant.getId(),
+                tenant.getCode(),
+                tenant.getName(),
+                tenant.getStatus().name(),
+                tenant.getContactName(),
+                tenant.getContactEmail(),
+                tenant.getNotes(),
+                admin == null ? null : new TenantAdminSummary(admin.getId(), admin.getEmail(), admin.getDisplayName()));
+    }
+
   @Transactional
   public TenantSummary updateStatus(CurrentUser actor, Long tenantId, TenantStatus status) {
     Tenant tenant = tenantRepository.findById(tenantId).orElseThrow();
@@ -134,6 +181,21 @@ public class TenantService {
       String adminDisplayName,
       String adminPassword) {}
 
+  public record UpdateTenantRequest(
+      String name, String contactName, String contactEmail, String notes) {}
+
   public record TenantSummary(
       Long id, String code, String name, String status, String contactName, String contactEmail) {}
+
+  public record TenantAdminSummary(Long id, String email, String displayName) {}
+
+  public record TenantDetail(
+      Long id,
+      String code,
+      String name,
+      String status,
+      String contactName,
+      String contactEmail,
+      String notes,
+      TenantAdminSummary admin) {}
 }

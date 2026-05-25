@@ -110,4 +110,8 @@ public class AuditLog {
   public void setContextJson(String contextJson) {
     this.contextJson = contextJson;
   }
+
+  public Instant getCreatedAt() {
+    return createdAt;
+  }
 }

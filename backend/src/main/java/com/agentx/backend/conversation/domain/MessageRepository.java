@@ -5,4 +5,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface MessageRepository extends JpaRepository<Message, Long> {
   List<Message> findByConversationIdOrderByIdAsc(Long conversationId);
+
+  long countByTenantId(Long tenantId);
 }

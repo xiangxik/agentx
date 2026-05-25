@@ -10,6 +10,8 @@ import com.agentx.backend.conversation.domain.MessageRepository;
 import com.agentx.backend.conversation.domain.MessageRole;
 import com.agentx.backend.conversation.domain.MessageStatus;
 import com.agentx.backend.faq.application.FaqService;
+import com.agentx.backend.knowledge.application.KnowledgeRetrievalService;
+import com.agentx.backend.plan.application.PlanService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
@@ -25,25 +27,33 @@ public class PublicChatService {
   private final ConversationRepository conversationRepository;
   private final MessageRepository messageRepository;
   private final FaqService faqService;
+    private final KnowledgeRetrievalService knowledgeRetrievalService;
   private final ObjectMapper objectMapper;
+    private final PlanService planService;
 
   public PublicChatService(
       ChatbotService chatbotService,
       ConversationRepository conversationRepository,
       MessageRepository messageRepository,
       FaqService faqService,
-      ObjectMapper objectMapper) {
+    KnowledgeRetrievalService knowledgeRetrievalService,
+            ObjectMapper objectMapper,
+            PlanService planService) {
     this.chatbotService = chatbotService;
     this.conversationRepository = conversationRepository;
     this.messageRepository = messageRepository;
     this.faqService = faqService;
+    this.knowledgeRetrievalService = knowledgeRetrievalService;
     this.objectMapper = objectMapper;
+        this.planService = planService;
   }
 
   @Transactional
   public InitConversationResponse init(InitConversationRequest request) {
     PublicChatbotSnapshot snapshot =
         chatbotService.requireActiveSnapshot(request.chatbotPublicCode());
+        planService.ensureTenantWithinLimit(snapshot.tenantId(), "conversations", 1);
+
     Conversation conversation = new Conversation();
     conversation.setTenantId(snapshot.tenantId());
     conversation.setChatbotId(snapshot.chatbotId());
@@ -68,6 +78,8 @@ public class PublicChatService {
   public SendMessageResponse send(SendMessageRequest request) {
     PublicChatbotSnapshot snapshot =
         chatbotService.requireActiveSnapshot(request.chatbotPublicCode());
+        planService.ensureTenantWithinLimit(snapshot.tenantId(), "messages", 2);
+
     Conversation conversation =
         conversationRepository
             .findByIdAndTenantId(request.conversationId(), snapshot.tenantId())
@@ -85,7 +97,17 @@ public class PublicChatService {
     FaqService.MatchResult faqMatch =
         faqService.match(
             snapshot.tenantId(), snapshot.chatbotId(), request.language(), request.message());
-    String answer = faqMatch.matched() ? faqMatch.answer() : snapshot.fallbackMessage();
+    KnowledgeRetrievalService.RetrievalResult knowledgeMatch =
+        faqMatch.matched()
+            ? new KnowledgeRetrievalService.RetrievalResult(false, null, null, null, null, 0)
+            : knowledgeRetrievalService.search(snapshot.tenantId(), snapshot.chatbotId(), request.message());
+    String answer =
+        faqMatch.matched()
+            ? faqMatch.answer()
+            : knowledgeMatch.matched()
+                ? "根据知识库内容：" + knowledgeMatch.content()
+                : snapshot.fallbackMessage();
+    String sourceType = faqMatch.matched() ? "FAQ" : knowledgeMatch.matched() ? "KNOWLEDGE" : "FALLBACK";
 
     Message assistantMessage = new Message();
     assistantMessage.setTenantId(snapshot.tenantId());
@@ -98,17 +120,26 @@ public class PublicChatService {
             Map.of(
                 "matchedFaq", faqMatch.matched(),
                 "faqId", faqMatch.faqId() == null ? "" : String.valueOf(faqMatch.faqId()),
-                "sourceType", faqMatch.matched() ? "FAQ" : "FALLBACK")));
+                "knowledgeSourceId",
+                knowledgeMatch.sourceId() == null ? "" : String.valueOf(knowledgeMatch.sourceId()),
+                "sourceType", sourceType)));
     Message savedAssistantMessage = messageRepository.save(assistantMessage);
 
     return new SendMessageResponse(
         conversation.getId(),
         savedAssistantMessage.getId(),
         answer,
-        faqMatch.matched() ? "FAQ" : "FALLBACK",
+        sourceType,
         faqMatch.matched()
-            ? List.of(new Citation(faqMatch.faqId(), faqMatch.question(), "FAQ"))
-            : List.of());
+            ? List.of(new Citation(faqMatch.faqId(), faqMatch.question(), "FAQ", null))
+            : knowledgeMatch.matched()
+                ? List.of(
+                    new Citation(
+                        knowledgeMatch.sourceId(),
+                        knowledgeMatch.sourceName(),
+                        "KNOWLEDGE",
+                        knowledgeMatch.sourceLink()))
+                : List.of());
   }
 
   @Transactional(readOnly = true)
@@ -154,7 +185,7 @@ public class PublicChatService {
       String sourceType,
       List<Citation> citations) {}
 
-  public record Citation(Long sourceId, String title, String sourceType) {}
+    public record Citation(Long sourceId, String title, String sourceType, String sourceLink) {}
 
   public record ConversationTranscript(
       Long conversationId, String anonymousVisitorId, List<TranscriptMessage> messages) {}

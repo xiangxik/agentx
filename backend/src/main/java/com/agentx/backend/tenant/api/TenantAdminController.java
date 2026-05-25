@@ -6,8 +6,8 @@ import com.agentx.backend.tenant.domain.TenantStatus;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -31,6 +31,11 @@ public class TenantAdminController {
     return tenantService.list();
   }
 
+  @GetMapping("/{tenantId}")
+  public TenantService.TenantDetail get(@PathVariable Long tenantId) {
+    return tenantService.get(tenantId);
+  }
+
   @PostMapping
   public TenantService.TenantSummary create(@RequestBody CreateTenantRequest request) {
     return tenantService.create(
@@ -44,6 +49,16 @@ public class TenantAdminController {
             request.adminEmail(),
             request.adminDisplayName(),
             request.adminPassword()));
+  }
+
+  @PatchMapping("/{tenantId}")
+  public TenantService.TenantDetail update(
+      @PathVariable Long tenantId, @RequestBody UpdateTenantRequest request) {
+    return tenantService.update(
+        SecurityUtils.currentUser(),
+        tenantId,
+        new TenantService.UpdateTenantRequest(
+            request.name(), request.contactName(), request.contactEmail(), request.notes()));
   }
 
   @PatchMapping("/{tenantId}/status")
@@ -62,6 +77,9 @@ public class TenantAdminController {
       @Email String adminEmail,
       @NotBlank String adminDisplayName,
       @NotBlank String adminPassword) {}
+
+  public record UpdateTenantRequest(
+      @NotBlank String name, String contactName, @Email String contactEmail, String notes) {}
 
   public record UpdateStatusRequest(@NotBlank String status) {}
 }
