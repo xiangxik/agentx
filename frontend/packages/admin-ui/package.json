@@ -13,6 +13,8 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@ant-design/icons": "^6.2.3",
+    "antd": "^6.4.3",
     "react": "^19.1.0",
     "react-router-dom": "^7.6.2"
   }

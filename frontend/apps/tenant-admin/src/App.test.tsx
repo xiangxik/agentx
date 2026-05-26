@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as apiClient from '@agentx/api-client';
@@ -125,11 +125,32 @@ function seedSession(path = '/chatbots') {
 }
 
 function findSelectForField(label: string) {
-  const field = screen.getAllByText(label, { selector: 'span' })[0]?.closest('label');
+  const field = screen.getByText(label, { selector: 'strong' }).closest('label');
   expect(field).not.toBeNull();
-  const select = field?.querySelector('select');
-  expect(select).not.toBeNull();
-  return select as HTMLSelectElement;
+  const nativeSelect = field?.querySelector('select');
+
+  if (nativeSelect) {
+    return nativeSelect as HTMLSelectElement;
+  }
+
+  return within(field as HTMLLabelElement).getByRole('combobox');
+}
+
+function selectFieldOption(label: string, optionText: string) {
+  const control = findSelectForField(label);
+
+  if (control instanceof HTMLSelectElement) {
+    const option = Array.from(control.options).find((item) => item.text === optionText);
+    expect(option).toBeDefined();
+    fireEvent.change(control, { target: { value: option?.value } });
+    return;
+  }
+
+  const trigger = control.closest('.ant-select')?.querySelector('.ant-select-selector') as HTMLElement | null;
+  fireEvent.mouseDown(trigger ?? control);
+  const option = screen.getAllByText(optionText).find((node) => node.closest('.ant-select-item-option'))?.closest('.ant-select-item-option');
+  expect(option).toBeDefined();
+  fireEvent.click(option as HTMLElement);
 }
 
 describe('tenant-admin app', () => {
@@ -167,16 +188,13 @@ describe('tenant-admin app', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('Chatbot 管理')).toBeInTheDocument();
+    expect(await screen.findByText('机器人管理')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Billing Bot' }));
     expect(await screen.findByText('知识 Embedding：系统默认 Embedding')).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: '保存策略' })).toBeInTheDocument();
 
-    fireEvent.change(findSelectForField('Embedding Provider'), {
-      target: { value: 'embed-provider' }
-    });
-    fireEvent.change(findSelectForField('Embedding Model'), {
-      target: { value: 'embedding-model-b' }
-    });
+    selectFieldOption('Embedding Provider', 'Embedding Provider');
+    selectFieldOption('Embedding Model', 'Embedding Model B');
     fireEvent.click(screen.getByRole('button', { name: '保存策略' }));
 
     await waitFor(() => {

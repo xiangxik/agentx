@@ -146,6 +146,38 @@ function seedSession(path = '/models') {
   window.history.pushState({}, '', path);
 }
 
+function findLabeledField(container: ReturnType<typeof within>, label: string) {
+  const field = container.getByText(label, { selector: 'strong' }).closest('label');
+  expect(field).not.toBeNull();
+  return field as HTMLLabelElement;
+}
+
+function changeFieldValue(container: ReturnType<typeof within>, label: string, value: string) {
+  const field = findLabeledField(container, label);
+  const input = field.querySelector('input');
+  expect(input).not.toBeNull();
+  fireEvent.change(input as HTMLInputElement, { target: { value } });
+}
+
+function selectFieldOption(container: ReturnType<typeof within>, label: string, optionText: string) {
+  const field = findLabeledField(container, label);
+  const nativeSelect = field.querySelector('select');
+
+  if (nativeSelect) {
+    const option = Array.from((nativeSelect as HTMLSelectElement).options).find((item) => item.text === optionText);
+    expect(option).toBeDefined();
+    fireEvent.change(nativeSelect, { target: { value: option?.value } });
+    return;
+  }
+
+  const combobox = within(field).getByRole('combobox');
+  const trigger = combobox.closest('.ant-select')?.querySelector('.ant-select-selector') as HTMLElement | null;
+  fireEvent.mouseDown(trigger ?? combobox);
+  const option = screen.getAllByText(optionText).find((node) => node.closest('.ant-select-item-option'))?.closest('.ant-select-item-option');
+  expect(option).toBeDefined();
+  fireEvent.click(option as HTMLElement);
+}
+
 function setupBaseMocks(
   providers: apiClient.ModelProviderSummary[] = [buildProvider()],
   models: apiClient.ModelDefinitionSummary[] = [buildModel()]
@@ -195,11 +227,12 @@ describe('super-admin app', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('模型供应商')).toBeInTheDocument();
-    expect(await screen.findByText('Provider 列表')).toBeInTheDocument();
+    expect(await screen.findByText('模型提供方与模型')).toBeInTheDocument();
+    expect(await screen.findByText('提供方列表')).toBeInTheDocument();
     expect(screen.getAllByText('Azure OpenAI').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('tab', { name: '总览' }));
+    expect(await screen.findByText('统计筛选')).toBeInTheDocument();
     expect(screen.getAllByText('GPT 4.1 Mini').length).toBeGreaterThan(0);
-    expect(screen.getByText('统计筛选')).toBeInTheDocument();
     expect(screen.getByText('18200')).toBeInTheDocument();
     await waitFor(() => {
       expect(listAvailableProviderModelsMock).toHaveBeenCalledWith('session-token', 11);
@@ -251,17 +284,16 @@ describe('super-admin app', () => {
 
     render(<App />);
 
-    expect(await screen.findAllByText('新增 Provider')).not.toHaveLength(0);
+    fireEvent.click(await screen.findByRole('tab', { name: '提供方管理' }));
+    fireEvent.click(screen.getByRole('button', { name: '新增提供方' }));
 
-    const providerCard = screen.getAllByText('新增 Provider')[0].closest('section');
-    expect(providerCard).not.toBeNull();
-    const providerForm = within(providerCard as HTMLElement);
-    fireEvent.change(providerForm.getByLabelText('Provider Code'), { target: { value: 'anthropic' } });
-    fireEvent.change(providerForm.getByLabelText('显示名称'), { target: { value: 'Anthropic' } });
-    fireEvent.change(providerForm.getByLabelText('Transport'), { target: { value: 'ANTHROPIC' } });
-    fireEvent.change(providerForm.getByLabelText('API Key Env Var'), { target: { value: 'ANTHROPIC_API_KEY' } });
-    fireEvent.change(providerForm.getByLabelText('Supports'), { target: { value: 'CHAT_COMPLETION' } });
-    fireEvent.submit(providerForm.getByRole('button', { name: '创建 Provider' }).closest('form') as HTMLFormElement);
+    const providerForm = within(await screen.findByRole('dialog'));
+    changeFieldValue(providerForm, '提供方编码', 'anthropic');
+    changeFieldValue(providerForm, '显示名称', 'Anthropic');
+    selectFieldOption(providerForm, '接入方式', 'ANTHROPIC');
+    changeFieldValue(providerForm, 'API Key Env Var', 'ANTHROPIC_API_KEY');
+    changeFieldValue(providerForm, 'Supports', 'CHAT_COMPLETION');
+    fireEvent.submit(providerForm.getByRole('button', { name: '创建提供方' }).closest('form') as HTMLFormElement);
 
     await waitFor(() => {
       expect(createModelProviderMock).toHaveBeenCalledWith(
@@ -276,10 +308,10 @@ describe('super-admin app', () => {
     });
     expect(await screen.findByText('Provider Anthropic 已创建。')).toBeInTheDocument();
 
-    const modelCard = screen.getAllByText('新增模型')[0].closest('section');
-    expect(modelCard).not.toBeNull();
-    const modelForm = within(modelCard as HTMLElement);
-    fireEvent.change(modelForm.getByLabelText('Provider'), { target: { value: '12' } });
+    fireEvent.click(screen.getAllByRole('button', { name: '新增模型' })[0]);
+
+    const modelForm = within(await screen.findByRole('dialog'));
+    selectFieldOption(modelForm, '提供方', 'Anthropic');
 
     await waitFor(() => {
       expect(listAvailableProviderModelsMock).toHaveBeenCalledWith('session-token', 12);
@@ -290,12 +322,12 @@ describe('super-admin app', () => {
     });
 
     await waitFor(() => {
-      expect(modelForm.getByLabelText('显示名称')).toHaveValue('Claude 3.5 Sonnet');
+      expect(findLabeledField(modelForm, '显示名称').querySelector('input')).toHaveValue('Claude 3.5 Sonnet');
     });
 
-    fireEvent.change(modelForm.getByLabelText('输入单价 / 1k'), { target: { value: '0.8' } });
-    fireEvent.change(modelForm.getByLabelText('输出单价 / 1k'), { target: { value: '2.4' } });
-    fireEvent.change(modelForm.getByLabelText('Max Tokens'), { target: { value: '8192' } });
+    changeFieldValue(modelForm, '输入单价 / 1k', '0.8');
+    changeFieldValue(modelForm, '输出单价 / 1k', '2.4');
+    changeFieldValue(modelForm, 'Max Tokens', '8192');
     fireEvent.submit(modelForm.getByRole('button', { name: '创建模型' }).closest('form') as HTMLFormElement);
 
     await waitFor(() => {
@@ -310,8 +342,17 @@ describe('super-admin app', () => {
       );
     });
     expect(await screen.findByText('模型 Claude 3.5 Sonnet 已创建。')).toBeInTheDocument();
-    expect(screen.getAllByText('Anthropic').length).toBeGreaterThan(0);
-    expect(screen.getByText('claude-3-5-sonnet-latest / CHAT_COMPLETION')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Anthropic' }));
+    const providerDialog = within(await screen.findByRole('dialog'));
+    expect(
+      providerDialog.getByText((_, element) => element?.tagName === 'DIV' && element.textContent === '名称：Anthropic')
+    ).toBeInTheDocument();
+    expect(
+      providerDialog.getAllByText(
+        (_, element) => element?.tagName === 'DIV' && (element.textContent?.includes('claude-3-5-sonnet-latest') ?? false)
+      ).length
+    ).toBeGreaterThan(0);
   });
 
   it('updates provider and model operations and exports analytics', async () => {
@@ -344,25 +385,30 @@ describe('super-admin app', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('Provider 详情')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /Azure OpenAI/ }));
 
-    fireEvent.click(screen.getByRole('button', { name: '停用 Provider' }));
+    const providerDialog = within(await screen.findByRole('dialog'));
+    expect(providerDialog.getAllByText('提供方详情').length).toBeGreaterThan(0);
+
+    fireEvent.click(providerDialog.getByRole('button', { name: '停用提供方' }));
     await waitFor(() => {
       expect(updateModelProviderStatusMock).toHaveBeenCalledWith('session-token', 11, 'DISABLED');
     });
     expect(await screen.findByText('Provider Azure OpenAI 状态已更新为 DISABLED。')).toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole('button', { name: '停用' })[0]);
+    fireEvent.click(providerDialog.getAllByRole('button', { name: '停用' })[0]);
     await waitFor(() => {
       expect(updateModelDefinitionStatusMock).toHaveBeenCalledWith('session-token', 21, 'DISABLED');
     });
 
-    fireEvent.click(screen.getAllByRole('button', { name: '设为默认' })[1]);
+    fireEvent.click(providerDialog.getAllByRole('button', { name: '设为默认' })[1]);
     await waitFor(() => {
       expect(setDefaultModelDefinitionMock).toHaveBeenCalledWith('session-token', 22);
     });
     expect(await screen.findByText('模型 GPT 4o Mini 已设为默认。')).toBeInTheDocument();
 
+    fireEvent.click(document.querySelector('.ant-modal-close') as HTMLElement);
+    fireEvent.click(screen.getByRole('tab', { name: '提供方管理' }));
     fireEvent.click(screen.getByRole('button', { name: '导出 CSV' }));
     await waitFor(() => {
       expect(exportModelAnalyticsMock).toHaveBeenCalledWith(
