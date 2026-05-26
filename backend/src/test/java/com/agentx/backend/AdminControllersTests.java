@@ -10,13 +10,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.agentx.backend.auth.application.BootstrapDataInitializer;
 import com.agentx.backend.auth.application.DatabaseUserDetailsService;
+import com.agentx.backend.knowledge.domain.KnowledgeChunkRepository;
 import com.agentx.backend.knowledge.domain.KnowledgeSourceRepository;
 import com.agentx.backend.knowledge.domain.KnowledgeSourceStatus;
+import com.agentx.backend.model.domain.ModelCallLog;
+import com.agentx.backend.model.domain.ModelCallLogRepository;
+import com.agentx.backend.model.domain.ModelCallStatus;
+import com.agentx.backend.model.domain.ModelPurpose;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,7 +39,9 @@ class AdminControllersTests {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private DatabaseUserDetailsService userDetailsService;
+  @Autowired private KnowledgeChunkRepository knowledgeChunkRepository;
   @Autowired private KnowledgeSourceRepository knowledgeSourceRepository;
+  @Autowired private ModelCallLogRepository modelCallLogRepository;
 
   private UserDetails authUser(String email) {
     return userDetailsService.loadUserByUsername(email);
@@ -258,11 +265,572 @@ class AdminControllersTests {
         .andExpect(jsonPath("$.status").value("DISABLED"));
   }
 
+    @Test
+    void superAdminCanManageModelProvidersAndDefinitions() throws Exception {
+    String providerResponse =
+      mockMvc
+        .perform(
+          post("/api/admin/model-providers")
+            .with(user("admin@example.com").roles("SUPER_ADMIN"))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(
+              """
+              {
+                "providerCode":"azure-openai",
+                "displayName":"Azure OpenAI",
+                "apiEndpoint":"https://azure.example.test/openai",
+                "apiKey":"secret-987654",
+                "status":"ACTIVE",
+                "supports":"CHAT_COMPLETION,EMBEDDING",
+                "transport":"OPENAI_COMPATIBLE",
+                "apiKeyEnvVar":"AZURE_OPENAI_KEY",
+                "apiVersion":"2024-02-15-preview"
+              }
+              """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.apiKeyHint").value("****7654"))
+        .andExpect(jsonPath("$.transport").value("OPENAI_COMPATIBLE"))
+        .andExpect(jsonPath("$.apiVersion").value("2024-02-15-preview"))
+        .andReturn()
+        .getResponse()
+        .getContentAsString();
+
+    long providerId = JsonTestUtils.readLong(providerResponse, "id");
+
+    String modelResponse =
+      mockMvc
+        .perform(
+          post("/api/admin/model-providers/{providerId}/models", providerId)
+            .with(user("admin@example.com").roles("SUPER_ADMIN"))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(
+              """
+              {
+                "modelCode":"gpt-4.1-mini",
+                "displayName":"GPT 4.1 Mini",
+                "purpose":"CHAT_COMPLETION",
+                "status":"ACTIVE",
+                "isDefault":true,
+                "inputPricePer1k":0.3,
+                "outputPricePer1k":1.2,
+                "maxTokens":4096
+              }
+              """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.providerCode").value("azure-openai"))
+        .andReturn()
+        .getResponse()
+        .getContentAsString();
+
+    long modelId = JsonTestUtils.readLong(modelResponse, "id");
+
+    mockMvc
+      .perform(get("/api/admin/model-providers").with(user("admin@example.com").roles("SUPER_ADMIN")))
+      .andExpect(status().isOk())
+      .andExpect(jsonPath("$[0].providerCode").value("azure-openai"))
+      .andExpect(jsonPath("$[0].apiKeyEnvVar").value("AZURE_OPENAI_KEY"))
+      .andExpect(jsonPath("$[0].apiVersion").value("2024-02-15-preview"));
+
+    mockMvc
+      .perform(
+        get("/api/admin/model-providers/models")
+          .with(user("admin@example.com").roles("SUPER_ADMIN")))
+      .andExpect(status().isOk())
+      .andExpect(jsonPath("$[0].modelCode").value("gpt-4.1-mini"));
+
+    mockMvc
+      .perform(
+        patch("/api/admin/model-providers/models/{modelId}/status", modelId)
+          .with(user("admin@example.com").roles("SUPER_ADMIN"))
+          .contentType(MediaType.APPLICATION_JSON)
+          .content(
+            """
+            {
+              "status":"DISABLED"
+            }
+            """))
+      .andExpect(status().isOk())
+      .andExpect(jsonPath("$.status").value("DISABLED"));
+
+    mockMvc
+      .perform(
+        patch("/api/admin/model-providers/{providerId}/status", providerId)
+          .with(user("admin@example.com").roles("SUPER_ADMIN"))
+          .contentType(MediaType.APPLICATION_JSON)
+          .content(
+            """
+            {
+              "status":"DISABLED"
+            }
+            """))
+      .andExpect(status().isOk())
+      .andExpect(jsonPath("$.status").value("DISABLED"));
+
+    mockMvc
+      .perform(get("/api/admin/model-analytics").with(user("admin@example.com").roles("SUPER_ADMIN")))
+      .andExpect(status().isOk())
+      .andExpect(jsonPath("$.totalCalls").exists())
+      .andExpect(jsonPath("$.providers").isArray())
+      .andExpect(jsonPath("$.models").isArray());
+  }
+
+  @Test
+  void superAdminCanLoadAvailableModelsForProvider() throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    server.createContext(
+        "/v1/models",
+        exchange -> {
+          byte[] responseBody =
+              """
+              {
+                "data":[
+                  {"id":"gpt-4.1-mini","name":"GPT 4.1 Mini"},
+                  {"id":"gpt-4o-mini","name":"GPT 4o Mini"}
+                ]
+              }
+              """
+                  .getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
+          exchange.sendResponseHeaders(200, responseBody.length);
+          exchange.getResponseBody().write(responseBody);
+          exchange.close();
+        });
+    server.start();
+
+    System.setProperty("agentx.model.OPENAI_MODELS_KEY", "local-test-key");
+    try {
+      String providerResponse =
+          mockMvc
+              .perform(
+                  post("/api/admin/model-providers")
+                      .with(user("admin@example.com").roles("SUPER_ADMIN"))
+                      .contentType(MediaType.APPLICATION_JSON)
+                      .content(
+                          """
+                          {
+                            "providerCode":"catalog-openai",
+                            "displayName":"Catalog OpenAI",
+                            "apiEndpoint":"http://127.0.0.1:%d/v1",
+                            "apiKey":"secret-987654",
+                            "status":"ACTIVE",
+                            "supports":"CHAT_COMPLETION",
+                            "transport":"OPENAI_COMPATIBLE",
+                            "apiKeyEnvVar":"OPENAI_MODELS_KEY"
+                          }
+                          """
+                              .formatted(server.getAddress().getPort())))
+              .andExpect(status().isOk())
+              .andReturn()
+              .getResponse()
+              .getContentAsString();
+
+      long providerId = JsonTestUtils.readLong(providerResponse, "id");
+
+      mockMvc
+          .perform(
+              get("/api/admin/model-providers/{providerId}/available-models", providerId)
+                  .with(user("admin@example.com").roles("SUPER_ADMIN")))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$[0].modelCode").value("gpt-4.1-mini"))
+          .andExpect(jsonPath("$[0].displayName").value("GPT 4.1 Mini"))
+          .andExpect(jsonPath("$[1].modelCode").value("gpt-4o-mini"));
+    } finally {
+      System.clearProperty("agentx.model.OPENAI_MODELS_KEY");
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void superAdminCanLoadQwenAvailableModelsFromDashScopeCatalog() throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    server.createContext(
+        "/api/v1/models",
+        exchange -> {
+          byte[] responseBody =
+              """
+              {
+                "data":[
+                  {"id":"qwen-plus","name":"Qwen Plus"},
+                  {"id":"qwen-max","name":"Qwen Max"},
+                  {"id":"text-embedding-v3","name":"Text Embedding V3"}
+                ]
+              }
+              """
+                  .getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
+          exchange.sendResponseHeaders(200, responseBody.length);
+          exchange.getResponseBody().write(responseBody);
+          exchange.close();
+        });
+    server.start();
+
+    System.setProperty("agentx.model.DASHSCOPE_MODELS_KEY", "local-test-key");
+    try {
+      String providerResponse =
+          mockMvc
+              .perform(
+                  post("/api/admin/model-providers")
+                      .with(user("admin@example.com").roles("SUPER_ADMIN"))
+                      .contentType(MediaType.APPLICATION_JSON)
+                      .content(
+                          """
+                          {
+                            "providerCode":"catalog-qwen",
+                            "displayName":"Catalog Qwen",
+                            "apiEndpoint":"http://127.0.0.1:%d/compatible-mode/v1",
+                            "apiKey":"secret-987654",
+                            "status":"ACTIVE",
+                            "supports":"CHAT_COMPLETION",
+                            "transport":"QWEN_DASHSCOPE",
+                            "apiKeyEnvVar":"DASHSCOPE_MODELS_KEY"
+                          }
+                          """
+                              .formatted(server.getAddress().getPort())))
+              .andExpect(status().isOk())
+              .andReturn()
+              .getResponse()
+              .getContentAsString();
+
+      long providerId = JsonTestUtils.readLong(providerResponse, "id");
+
+      mockMvc
+          .perform(
+              get("/api/admin/model-providers/{providerId}/available-models", providerId)
+                  .with(user("admin@example.com").roles("SUPER_ADMIN")))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$[0].modelCode").value("qwen-plus"))
+          .andExpect(jsonPath("$[1].modelCode").value("qwen-max"))
+          .andExpect(jsonPath("$[2]").doesNotExist());
+    } finally {
+      System.clearProperty("agentx.model.DASHSCOPE_MODELS_KEY");
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void superAdminCannotCreateAnthropicEmbeddingModel() throws Exception {
+    String providerResponse =
+        mockMvc
+            .perform(
+                post("/api/admin/model-providers")
+                    .with(user("admin@example.com").roles("SUPER_ADMIN"))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """
+                        {
+                          "providerCode":"anthropic-embed-test",
+                          "displayName":"Anthropic Embed Test",
+                          "apiEndpoint":"https://api.anthropic.test",
+                          "apiKey":"secret-123456",
+                          "status":"ACTIVE",
+                          "supports":"CHAT_COMPLETION,EMBEDDING",
+                          "transport":"ANTHROPIC",
+                          "apiKeyEnvVar":"ANTHROPIC_TEST_KEY"
+                        }
+                        """))
+            .andExpect(status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    long providerId = JsonTestUtils.readLong(providerResponse, "id");
+
+    mockMvc
+        .perform(
+            post("/api/admin/model-providers/{providerId}/models", providerId)
+                .with(user("admin@example.com").roles("SUPER_ADMIN"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "modelCode":"claude-embedding-1",
+                      "displayName":"Claude Embedding 1",
+                      "purpose":"EMBEDDING",
+                      "status":"ACTIVE",
+                      "isDefault":true,
+                      "inputPricePer1k":0.02,
+                      "outputPricePer1k":0.0,
+                      "maxTokens":8192
+                    }
+                    """))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("EMBEDDING_TRANSPORT_UNSUPPORTED"));
+  }
+
+  @Test
+  void superAdminCanFilterModelAnalyticsByCreatedAtWindow() throws Exception {
+    ModelCallLog recentSuccess = new ModelCallLog();
+    recentSuccess.setTenantId(1L);
+    recentSuccess.setChatbotId(1L);
+    recentSuccess.setConversationId(101L);
+    recentSuccess.setProviderCode("provider-recent");
+    recentSuccess.setModelCode("model-recent");
+    recentSuccess.setPurpose(ModelPurpose.CHAT_COMPLETION);
+    recentSuccess.setStatus(ModelCallStatus.SUCCESS);
+    recentSuccess.setPromptTokens(120);
+    recentSuccess.setCompletionTokens(30);
+    recentSuccess.setTotalTokens(150);
+    recentSuccess.setEstimatedCost(0.75);
+    recentSuccess.setRetryCount(0);
+    recentSuccess.setLatencyMs(180);
+    recentSuccess.setMetadataJson("{}");
+    recentSuccess.setCreatedAt(Instant.parse("2026-05-20T10:15:30Z"));
+    modelCallLogRepository.save(recentSuccess);
+
+    ModelCallLog oldFailure = new ModelCallLog();
+    oldFailure.setTenantId(1L);
+    oldFailure.setChatbotId(1L);
+    oldFailure.setConversationId(102L);
+    oldFailure.setProviderCode("provider-old");
+    oldFailure.setModelCode("model-old");
+    oldFailure.setPurpose(ModelPurpose.CHAT_COMPLETION);
+    oldFailure.setStatus(ModelCallStatus.FAILED);
+    oldFailure.setPromptTokens(80);
+    oldFailure.setCompletionTokens(0);
+    oldFailure.setTotalTokens(80);
+    oldFailure.setEstimatedCost(0.0);
+    oldFailure.setRetryCount(1);
+    oldFailure.setLatencyMs(90);
+    oldFailure.setErrorMessage("timeout");
+    oldFailure.setMetadataJson("{}");
+    oldFailure.setCreatedAt(Instant.parse("2026-01-10T08:00:00Z"));
+    modelCallLogRepository.save(oldFailure);
+
+    ModelCallLog recentFailure = new ModelCallLog();
+    recentFailure.setTenantId(2L);
+    recentFailure.setChatbotId(2L);
+    recentFailure.setConversationId(103L);
+    recentFailure.setProviderCode("provider-recent-b");
+    recentFailure.setModelCode("model-recent-b");
+    recentFailure.setPurpose(ModelPurpose.CHAT_COMPLETION);
+    recentFailure.setStatus(ModelCallStatus.FAILED);
+    recentFailure.setPromptTokens(40);
+    recentFailure.setCompletionTokens(0);
+    recentFailure.setTotalTokens(40);
+    recentFailure.setEstimatedCost(0.1);
+    recentFailure.setRetryCount(0);
+    recentFailure.setLatencyMs(70);
+    recentFailure.setErrorMessage("rate_limit");
+    recentFailure.setMetadataJson("{}");
+    recentFailure.setCreatedAt(Instant.parse("2026-05-22T08:00:00Z"));
+    modelCallLogRepository.save(recentFailure);
+
+    ModelCallLog previousSuccess = new ModelCallLog();
+    previousSuccess.setTenantId(1L);
+    previousSuccess.setChatbotId(1L);
+    previousSuccess.setConversationId(104L);
+    previousSuccess.setProviderCode("provider-prev");
+    previousSuccess.setModelCode("model-prev");
+    previousSuccess.setPurpose(ModelPurpose.CHAT_COMPLETION);
+    previousSuccess.setStatus(ModelCallStatus.SUCCESS);
+    previousSuccess.setPromptTokens(90);
+    previousSuccess.setCompletionTokens(10);
+    previousSuccess.setTotalTokens(100);
+    previousSuccess.setEstimatedCost(0.25);
+    previousSuccess.setRetryCount(0);
+    previousSuccess.setLatencyMs(45);
+    previousSuccess.setMetadataJson("{}");
+    previousSuccess.setCreatedAt(Instant.parse("2026-04-15T09:30:00Z"));
+    modelCallLogRepository.save(previousSuccess);
+
+    mockMvc
+      .perform(get("/api/admin/model-analytics").with(user("admin@example.com").roles("SUPER_ADMIN")))
+      .andExpect(status().isOk())
+      .andExpect(jsonPath("$.totalCalls").value(4))
+      .andExpect(jsonPath("$.failedCalls").value(2));
+
+    mockMvc
+      .perform(
+        get("/api/admin/model-analytics")
+          .with(user("admin@example.com").roles("SUPER_ADMIN"))
+          .param("createdFrom", "2026-05-01T00:00:00Z")
+          .param("createdTo", "2026-05-31T23:59:59Z"))
+      .andExpect(status().isOk())
+      .andExpect(jsonPath("$.totalCalls").value(2))
+      .andExpect(jsonPath("$.successCalls").value(1))
+      .andExpect(jsonPath("$.failedCalls").value(1))
+      .andExpect(jsonPath("$.totalTokens").value(190))
+      .andExpect(jsonPath("$.trends.totalCalls.previousValue").value(1.0))
+      .andExpect(jsonPath("$.trends.totalCalls.deltaValue").value(1.0))
+      .andExpect(jsonPath("$.trends.totalTokens.previousValue").value(100.0))
+      .andExpect(jsonPath("$.providers[0].trends.totalCalls.previousValue").value(0.0))
+      .andExpect(jsonPath("$.models[0].trends.totalCalls.previousValue").value(0.0))
+      .andExpect(jsonPath("$.providers[0].providerCode").value("provider-recent"))
+      .andExpect(jsonPath("$.models[0].modelCode").value("model-recent"));
+
+    mockMvc
+      .perform(
+        get("/api/admin/model-analytics")
+          .with(user("admin@example.com").roles("SUPER_ADMIN"))
+          .param("createdFrom", "2026-05-01T00:00:00Z")
+          .param("createdTo", "2026-05-31T23:59:59Z")
+          .param("rowLimit", "1"))
+      .andExpect(status().isOk())
+      .andExpect(jsonPath("$.providers.length()").value(1))
+      .andExpect(jsonPath("$.models.length()").value(1));
+
+    mockMvc
+      .perform(
+        get("/api/admin/model-analytics/export")
+          .with(user("admin@example.com").roles("SUPER_ADMIN"))
+          .param("tenantId", "1")
+          .param("providerCode", "provider-recent")
+          .param("modelCode", "model-recent")
+          .param("createdFrom", "2026-05-01T00:00:00Z")
+          .param("createdTo", "2026-05-31T23:59:59Z")
+          .param("rowLimit", "1"))
+      .andExpect(status().isOk())
+      .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("model-analytics-tenant-1-provider-provider-recent-model-model-recent-20260501T000000Z_to_20260531T235959Z-top-1.csv")))
+      .andExpect(header().string("Content-Type", org.hamcrest.Matchers.containsString("text/csv")))
+      .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("section,metric,current_value,previous_value,delta_value,delta_percent")))
+      .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("provider,\"provider-recent\"")))
+      .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("previous_total_calls,delta_total_calls,delta_total_calls_percent")));
+
+    mockMvc
+      .perform(
+        get("/api/admin/model-analytics")
+          .with(user("admin@example.com").roles("SUPER_ADMIN"))
+          .param("tenantId", "1")
+          .param("providerCode", "provider-old")
+          .param("modelCode", "model-old"))
+      .andExpect(status().isOk())
+      .andExpect(jsonPath("$.totalCalls").value(1))
+      .andExpect(jsonPath("$.successCalls").value(0))
+      .andExpect(jsonPath("$.failedCalls").value(1))
+      .andExpect(jsonPath("$.providers[0].providerCode").value("provider-old"))
+      .andExpect(jsonPath("$.models[0].modelCode").value("model-old"));
+
+    mockMvc
+      .perform(
+        get("/api/admin/model-analytics")
+          .with(user("admin@example.com").roles("SUPER_ADMIN"))
+          .param("tenantId", "999"))
+      .andExpect(status().isOk())
+      .andExpect(jsonPath("$.totalCalls").value(0))
+      .andExpect(jsonPath("$.providers").isArray())
+      .andExpect(jsonPath("$.models").isArray());
+  }
+
   @Test
   void nonSuperAdminCannotListTenants() throws Exception {
     mockMvc
         .perform(get("/api/admin/tenants").with(user("editor@example.com").roles("TENANT_ADMIN")))
         .andExpect(status().isForbidden());
+  }
+
+  @Test
+  void tenantAdminCanReadModelCatalogEndpoints() throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    server.createContext(
+        "/api/v1/models",
+        exchange -> {
+          byte[] responseBody =
+              """
+              {
+                "data":[
+                  {"id":"qwen-plus","name":"Qwen Plus"}
+                ]
+              }
+              """
+                  .getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
+          exchange.sendResponseHeaders(200, responseBody.length);
+          exchange.getResponseBody().write(responseBody);
+          exchange.close();
+        });
+    server.start();
+
+    System.setProperty("agentx.model.TENANT_DASHSCOPE_MODELS_KEY", "local-test-key");
+    try {
+      String providerResponse =
+          mockMvc
+              .perform(
+                  post("/api/admin/model-providers")
+                      .with(user("admin@example.com").roles("SUPER_ADMIN"))
+                      .contentType(MediaType.APPLICATION_JSON)
+                      .content(
+                          """
+                          {
+                            "providerCode":"tenant-qwen-catalog",
+                            "displayName":"Tenant Qwen Catalog",
+                            "apiEndpoint":"http://127.0.0.1:%d/compatible-mode/v1",
+                            "apiKey":"secret-987654",
+                            "status":"ACTIVE",
+                            "supports":"CHAT_COMPLETION",
+                            "transport":"QWEN_DASHSCOPE",
+                            "apiKeyEnvVar":"TENANT_DASHSCOPE_MODELS_KEY"
+                          }
+                          """
+                              .formatted(server.getAddress().getPort())))
+              .andExpect(status().isOk())
+              .andReturn()
+              .getResponse()
+              .getContentAsString();
+      long providerId = JsonTestUtils.readLong(providerResponse, "id");
+
+      mockMvc
+          .perform(
+              post("/api/admin/model-providers/{providerId}/models", providerId)
+                  .with(user("admin@example.com").roles("SUPER_ADMIN"))
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(
+                      """
+                      {
+                        "modelCode":"qwen-plus",
+                        "displayName":"Qwen Plus",
+                        "purpose":"CHAT_COMPLETION",
+                        "status":"ACTIVE",
+                        "isDefault":true,
+                        "inputPricePer1k":0.15,
+                        "outputPricePer1k":0.6,
+                        "maxTokens":2048
+                      }
+                      """))
+          .andExpect(status().isOk());
+
+      mockMvc
+          .perform(
+              post("/api/admin/tenants")
+                  .with(user("admin@example.com").roles("SUPER_ADMIN"))
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(
+                      """
+                      {
+                        "code":"tenant-model-reader",
+                        "name":"Tenant Model Reader",
+                        "contactName":"Alice",
+                        "contactEmail":"alice-reader@tenant.test",
+                        "notes":"model reader tenant",
+                        "adminEmail":"owner-model-reader@tenant.test",
+                        "adminDisplayName":"Owner Model Reader",
+                        "adminPassword":"Tenant123!"
+                      }
+                      """))
+          .andExpect(status().isOk());
+
+      UserDetails tenantAdmin = authUser("owner-model-reader@tenant.test");
+
+      mockMvc
+          .perform(get("/api/admin/model-providers").with(user(tenantAdmin)))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$[0].providerCode").value("tenant-qwen-catalog"));
+
+      mockMvc
+          .perform(get("/api/admin/model-providers/models").with(user(tenantAdmin)).param("purpose", "CHAT_COMPLETION"))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$[0].providerCode").value("tenant-qwen-catalog"))
+          .andExpect(jsonPath("$[0].modelCode").value("qwen-plus"));
+
+      mockMvc
+          .perform(
+              get("/api/admin/model-providers/{providerId}/available-models", providerId)
+                  .with(user(tenantAdmin)))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$[0].modelCode").value("qwen-plus"));
+    } finally {
+      System.clearProperty("agentx.model.TENANT_DASHSCOPE_MODELS_KEY");
+      server.stop(0);
+    }
   }
 
   @Test
@@ -722,7 +1290,23 @@ class AdminControllersTests {
               .andExpect(jsonPath("$.metadata.lastFetchedAt").exists())
               .andExpect(jsonPath("$.metadata.lastFetchedStatus").value(200))
               .andExpect(jsonPath("$.metadata.pageTitle").value("刷新来源页面"))
+                .andExpect(jsonPath("$.metadata.embeddedChunkCount").value(1))
               .andExpect(jsonPath("$.chunks[0].chunkIndex").value(0));
+
+              var refreshedChunk =
+                knowledgeChunkRepository.findByKnowledgeSourceIdOrderByChunkIndexAsc(sourceId).get(0);
+              org.junit.jupiter.api.Assertions.assertNotNull(refreshedChunk.getEmbeddingRef());
+              org.junit.jupiter.api.Assertions.assertFalse(refreshedChunk.getEmbeddingRef().isBlank());
+              org.junit.jupiter.api.Assertions.assertNotNull(refreshedChunk.getEmbeddingDimension());
+              org.junit.jupiter.api.Assertions.assertTrue(refreshedChunk.getEmbeddingDimension() > 0);
+
+              long embeddingLogCount =
+                modelCallLogRepository.findAll().stream()
+                  .filter(log -> log.getTenantId().equals(tenantId))
+                  .filter(log -> log.getChatbotId() != null && log.getChatbotId().equals(chatbotId))
+                  .filter(log -> log.getPurpose() == ModelPurpose.EMBEDDING)
+                  .count();
+              org.junit.jupiter.api.Assertions.assertEquals(1L, embeddingLogCount);
 
           var source = knowledgeSourceRepository.findById(sourceId).orElseThrow();
           source.setStatus(KnowledgeSourceStatus.FAILED);
@@ -1291,8 +1875,11 @@ class AdminControllersTests {
           get("/api/admin/conversations/{conversationId}/export", conversationId)
             .with(user(authUser("owner-conv@tenant.test"))))
         .andExpect(status().isOk())
-        .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("conversation-%d.json".formatted(conversationId))))
-        .andExpect(jsonPath("$.conversation.id").value(conversationId));
+        .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("conversation-%d-conversation-bot.json".formatted(conversationId))))
+        .andExpect(jsonPath("$.conversation.id").value(conversationId))
+        .andExpect(jsonPath("$.summary.chatbotName").value("Conversation Bot"))
+        .andExpect(jsonPath("$.summary.messageCount").value(2))
+        .andExpect(jsonPath("$.summary.modelCallCount").value(0));
 
       mockMvc
         .perform(

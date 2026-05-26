@@ -3,6 +3,7 @@ package com.agentx.backend.knowledge.application;
 import com.agentx.backend.audit.application.AuditLogService;
 import com.agentx.backend.chatbot.domain.ChatbotRepository;
 import com.agentx.backend.common.security.CurrentUser;
+import com.agentx.backend.model.application.ModelEmbeddingService;
 import com.agentx.backend.knowledge.domain.KnowledgeSource;
 import com.agentx.backend.knowledge.domain.KnowledgeChunk;
 import com.agentx.backend.knowledge.domain.KnowledgeChunkRepository;
@@ -49,6 +50,9 @@ public class KnowledgeSourceService {
   private final AuditLogService auditLogService;
   private final ObjectMapper objectMapper;
   private final PlanService planService;
+  private final ModelEmbeddingService modelEmbeddingService;
+  private final KnowledgeChunkVectorStore knowledgeChunkVectorStore;
+  private final KnowledgeChunkVectorIndexManager knowledgeChunkVectorIndexManager;
 
   public KnowledgeSourceService(
       KnowledgeSourceRepository knowledgeSourceRepository,
@@ -56,13 +60,19 @@ public class KnowledgeSourceService {
       ChatbotRepository chatbotRepository,
       AuditLogService auditLogService,
       ObjectMapper objectMapper,
-      PlanService planService) {
+      PlanService planService,
+      ModelEmbeddingService modelEmbeddingService,
+      KnowledgeChunkVectorStore knowledgeChunkVectorStore,
+      KnowledgeChunkVectorIndexManager knowledgeChunkVectorIndexManager) {
     this.knowledgeSourceRepository = knowledgeSourceRepository;
     this.knowledgeChunkRepository = knowledgeChunkRepository;
     this.chatbotRepository = chatbotRepository;
     this.auditLogService = auditLogService;
     this.objectMapper = objectMapper;
     this.planService = planService;
+    this.modelEmbeddingService = modelEmbeddingService;
+    this.knowledgeChunkVectorStore = knowledgeChunkVectorStore;
+    this.knowledgeChunkVectorIndexManager = knowledgeChunkVectorIndexManager;
   }
 
   @Transactional(readOnly = true)
@@ -390,8 +400,18 @@ public class KnowledgeSourceService {
   private void rebuildChunks(KnowledgeSource source, Map<String, Object> metadata) {
     knowledgeChunkRepository.deleteByKnowledgeSourceId(source.getId());
     List<String> chunks = buildChunks(source, metadata);
+    String embeddingProviderCode = null;
+    String embeddingModelCode = null;
     for (int index = 0; index < chunks.size(); index++) {
       String content = chunks.get(index);
+      ModelEmbeddingService.EmbeddingResult embedding =
+          modelEmbeddingService.generateEmbeddingReference(
+              source.getTenantId(),
+              source.getChatbotId(),
+              source.getId(),
+              index,
+              content,
+              source.getSourceUri());
       KnowledgeChunk chunk = new KnowledgeChunk();
       chunk.setTenantId(source.getTenantId());
       chunk.setChatbotId(source.getChatbotId());
@@ -400,9 +420,23 @@ public class KnowledgeSourceService {
       chunk.setContent(content);
       chunk.setSummary(content.length() > 120 ? content.substring(0, 120) : content);
       chunk.setSourceLink(source.getSourceUri());
-      knowledgeChunkRepository.save(chunk);
+      chunk.setEmbeddingRef(embedding.embeddingRef());
+      chunk.setEmbeddingJson(embedding.embeddingJson());
+      chunk.setEmbeddingDimension(embedding.dimensions());
+      KnowledgeChunk savedChunk = knowledgeChunkRepository.save(chunk);
+      knowledgeChunkVectorStore.syncChunkVector(savedChunk.getId(), savedChunk.getEmbeddingJson());
+      knowledgeChunkVectorIndexManager.ensureDimensionIndex(savedChunk.getEmbeddingDimension());
+      embeddingProviderCode = embedding.providerCode();
+      embeddingModelCode = embedding.modelCode();
     }
     metadata.put("chunkCount", chunks.size());
+    metadata.put("embeddedChunkCount", chunks.size());
+    if (embeddingProviderCode != null) {
+      metadata.put("embeddingProviderCode", embeddingProviderCode);
+    }
+    if (embeddingModelCode != null) {
+      metadata.put("embeddingModelCode", embeddingModelCode);
+    }
   }
 
   private List<String> buildChunks(KnowledgeSource source, Map<String, Object> metadata) {

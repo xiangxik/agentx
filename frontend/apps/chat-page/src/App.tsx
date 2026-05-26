@@ -1,7 +1,8 @@
 import { ChatSurface } from '@agentx/chat-core';
 
 export function App() {
-  const chatbotPublicCode = new URLSearchParams(globalThis.location.search).get('bot') ?? 'demo-bot';
+  const chatbotPublicCode =
+    new URLSearchParams(globalThis.location.search).get('bot') ?? '6370fe97-8eb7-4e23-83ea-66d4514c95c0';
 
   return (
     <ChatSurface

@@ -10,6 +10,7 @@ import com.agentx.backend.knowledge.domain.KnowledgeSource;
 import com.agentx.backend.knowledge.domain.KnowledgeSourceRepository;
 import com.agentx.backend.knowledge.domain.KnowledgeSourceStatus;
 import com.agentx.backend.knowledge.domain.KnowledgeSourceType;
+import com.agentx.backend.model.domain.ModelCallLogRepository;
 import com.agentx.backend.plan.domain.Plan;
 import com.agentx.backend.plan.domain.PlanRepository;
 import com.agentx.backend.plan.domain.PlanStatus;
@@ -31,6 +32,7 @@ public class PlanService {
   private final KnowledgeSourceRepository knowledgeSourceRepository;
   private final ConversationRepository conversationRepository;
   private final MessageRepository messageRepository;
+  private final ModelCallLogRepository modelCallLogRepository;
   private final AuditLogService auditLogService;
   private final ObjectMapper objectMapper;
 
@@ -41,6 +43,7 @@ public class PlanService {
       KnowledgeSourceRepository knowledgeSourceRepository,
       ConversationRepository conversationRepository,
       MessageRepository messageRepository,
+      ModelCallLogRepository modelCallLogRepository,
       AuditLogService auditLogService,
       ObjectMapper objectMapper) {
     this.planRepository = planRepository;
@@ -49,6 +52,7 @@ public class PlanService {
     this.knowledgeSourceRepository = knowledgeSourceRepository;
     this.conversationRepository = conversationRepository;
     this.messageRepository = messageRepository;
+    this.modelCallLogRepository = modelCallLogRepository;
     this.auditLogService = auditLogService;
     this.objectMapper = objectMapper;
   }
@@ -179,7 +183,7 @@ public class PlanService {
         "storageMb", getKnowledgeStorageUsageMb(effectiveTenantId),
             "messages", messageRepository.countByTenantId(effectiveTenantId),
             "conversations", conversationRepository.countByTenantId(effectiveTenantId),
-            "tokens", 0L);
+            "tokens", modelCallLogRepository.sumSuccessfulTokensByTenantId(effectiveTenantId));
 
     return new TenantQuotaOverview(
         effectiveTenantId,
@@ -221,6 +225,7 @@ public class PlanService {
           case "storageMb" -> getKnowledgeStorageUsageMb(tenantId);
           case "messages" -> messageRepository.countByTenantId(tenantId);
           case "conversations" -> conversationRepository.countByTenantId(tenantId);
+          case "tokens" -> modelCallLogRepository.sumSuccessfulTokensByTenantId(tenantId);
           default -> throw new IllegalArgumentException("Unsupported quota resource: " + resourceKey);
         };
 
@@ -254,6 +259,7 @@ public class PlanService {
       case "storageMb" -> "STORAGE_MB_LIMIT_REACHED";
       case "messages" -> "MESSAGES_LIMIT_REACHED";
       case "conversations" -> "CONVERSATIONS_LIMIT_REACHED";
+      case "tokens" -> "TOKENS_LIMIT_REACHED";
       default -> resourceKey.toUpperCase() + "_LIMIT_REACHED";
     };
   }

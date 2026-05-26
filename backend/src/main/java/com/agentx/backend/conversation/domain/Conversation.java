@@ -34,7 +34,7 @@ public class Conversation {
   @Column(nullable = false)
   private ConversationStatus status = ConversationStatus.ACTIVE;
 
-  @Column(name = "metadata_json", nullable = false)
+  @Column(name = "metadata_json", nullable = false, columnDefinition = "TEXT")
   private String metadataJson;
 
   @Column(name = "created_at", nullable = false)

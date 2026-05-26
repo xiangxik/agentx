@@ -1,0 +1,1 @@
+ALTER TABLE knowledge_chunk ADD COLUMN IF NOT EXISTS embedding_json TEXT;

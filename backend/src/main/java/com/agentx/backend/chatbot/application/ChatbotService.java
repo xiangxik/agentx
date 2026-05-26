@@ -71,7 +71,15 @@ public class ChatbotService {
     behavior.setChatbotId(saved.getId());
     behavior.setFallbackMessage("暂时没有找到匹配答案，我已经记录你的问题。请稍后再试或留下联系方式。");
     behavior.setConfigJson(
-        toJson(Map.of("allowDirectModel", false, "allowFeedback", true, "allowHandoff", true)));
+      toJson(
+        Map.of(
+          "allowDirectModel", false,
+          "allowFeedback", true,
+          "allowHandoff", true,
+          "providerCode", "",
+          "modelCode", "",
+          "embeddingProviderCode", "",
+          "embeddingModelCode", "")));
     chatbotBehaviorRepository.save(behavior);
 
     auditLogService.record(
@@ -118,7 +126,11 @@ public class ChatbotService {
         String.valueOf(appearanceConfig.getOrDefault("stylePreset", "executive")),
         Boolean.TRUE.equals(behaviorConfig.get("allowDirectModel")),
         Boolean.TRUE.equals(behaviorConfig.get("allowFeedback")),
-        Boolean.TRUE.equals(behaviorConfig.get("allowHandoff")));
+        Boolean.TRUE.equals(behaviorConfig.get("allowHandoff")),
+        emptyToNull(String.valueOf(behaviorConfig.getOrDefault("providerCode", ""))),
+        emptyToNull(String.valueOf(behaviorConfig.getOrDefault("modelCode", ""))),
+        emptyToNull(String.valueOf(behaviorConfig.getOrDefault("embeddingProviderCode", ""))),
+        emptyToNull(String.valueOf(behaviorConfig.getOrDefault("embeddingModelCode", ""))));
   }
 
   @Transactional
@@ -241,7 +253,13 @@ public class ChatbotService {
             Map.of(
                 "allowDirectModel", request.allowDirectModel(),
                 "allowFeedback", request.allowFeedback(),
-                "allowHandoff", request.allowHandoff())));
+                "allowHandoff", request.allowHandoff(),
+                "providerCode", request.providerCode() == null ? "" : request.providerCode().trim(),
+                "modelCode", request.modelCode() == null ? "" : request.modelCode().trim(),
+                "embeddingProviderCode",
+                request.embeddingProviderCode() == null ? "" : request.embeddingProviderCode().trim(),
+                "embeddingModelCode",
+                request.embeddingModelCode() == null ? "" : request.embeddingModelCode().trim())));
     auditLogService.record(
         chatbot.getTenantId(),
         actor.userId(),
@@ -264,6 +282,8 @@ public class ChatbotService {
         chatbotAppearanceRepository.findByChatbotId(chatbot.getId()).orElseThrow();
     ChatbotBehavior behavior =
         chatbotBehaviorRepository.findByChatbotId(chatbot.getId()).orElseThrow();
+    Map<String, Object> appearanceConfig = fromJson(appearance.getConfigJson());
+    Map<String, Object> behaviorConfig = fromJson(behavior.getConfigJson());
     return new PublicChatbotSnapshot(
         chatbot.getId(),
         chatbot.getTenantId(),
@@ -273,9 +293,14 @@ public class ChatbotService {
         chatbot.getPublicCode(),
         appearance.getThemeColor(),
         appearance.getWelcomeMessage(),
-      Boolean.TRUE.equals(fromJson(appearance.getConfigJson()).get("brandVisible")),
-      String.valueOf(fromJson(appearance.getConfigJson()).getOrDefault("stylePreset", "executive")),
-        behavior.getFallbackMessage());
+      Boolean.TRUE.equals(appearanceConfig.get("brandVisible")),
+      String.valueOf(appearanceConfig.getOrDefault("stylePreset", "executive")),
+        Boolean.TRUE.equals(behaviorConfig.get("allowDirectModel")),
+        behavior.getFallbackMessage(),
+        emptyToNull(String.valueOf(behaviorConfig.getOrDefault("providerCode", ""))),
+        emptyToNull(String.valueOf(behaviorConfig.getOrDefault("modelCode", ""))),
+        emptyToNull(String.valueOf(behaviorConfig.getOrDefault("embeddingProviderCode", ""))),
+        emptyToNull(String.valueOf(behaviorConfig.getOrDefault("embeddingModelCode", ""))));
   }
 
   @Transactional(readOnly = true)
@@ -305,6 +330,7 @@ public class ChatbotService {
 
   private ChatbotSummary toSummary(
       Chatbot chatbot, ChatbotAppearance appearance, ChatbotBehavior behavior) {
+    Map<String, Object> behaviorConfig = fromJson(behavior.getConfigJson());
     return new ChatbotSummary(
         chatbot.getId(),
         chatbot.getTenantId(),
@@ -315,7 +341,12 @@ public class ChatbotService {
         chatbot.getPublicCode(),
         appearance.getThemeColor(),
         appearance.getWelcomeMessage(),
-        behavior.getFallbackMessage());
+          behavior.getFallbackMessage(),
+          Boolean.TRUE.equals(behaviorConfig.get("allowDirectModel")),
+          emptyToNull(String.valueOf(behaviorConfig.getOrDefault("providerCode", ""))),
+          emptyToNull(String.valueOf(behaviorConfig.getOrDefault("modelCode", ""))),
+          emptyToNull(String.valueOf(behaviorConfig.getOrDefault("embeddingProviderCode", ""))),
+          emptyToNull(String.valueOf(behaviorConfig.getOrDefault("embeddingModelCode", ""))));
   }
 
   private String toJson(Map<String, Object> value) {
@@ -334,6 +365,10 @@ public class ChatbotService {
     }
   }
 
+  private String emptyToNull(String value) {
+    return value == null || value.isBlank() ? null : value;
+  }
+
   public record CreateChatbotRequest(
       Long tenantId, String name, String description, String language, ChatbotStatus status) {}
 
@@ -348,7 +383,14 @@ public class ChatbotService {
       String stylePreset) {}
 
   public record UpdateBehaviorRequest(
-      String fallbackMessage, boolean allowDirectModel, boolean allowFeedback, boolean allowHandoff) {}
+      String fallbackMessage,
+      boolean allowDirectModel,
+      boolean allowFeedback,
+      boolean allowHandoff,
+      String providerCode,
+      String modelCode,
+      String embeddingProviderCode,
+      String embeddingModelCode) {}
 
   public record ChatbotSummary(
       Long id,
@@ -360,7 +402,12 @@ public class ChatbotService {
       String publicCode,
       String themeColor,
       String welcomeMessage,
-      String fallbackMessage) {}
+      String fallbackMessage,
+      boolean allowDirectModel,
+      String providerCode,
+      String modelCode,
+      String embeddingProviderCode,
+      String embeddingModelCode) {}
 
   public record ChatbotDetail(
       Long id,
@@ -378,7 +425,11 @@ public class ChatbotService {
       String stylePreset,
       boolean allowDirectModel,
       boolean allowFeedback,
-      boolean allowHandoff) {}
+      boolean allowHandoff,
+      String providerCode,
+      String modelCode,
+      String embeddingProviderCode,
+      String embeddingModelCode) {}
 
   public record PublicChatbotSnapshot(
       Long chatbotId,
@@ -391,5 +442,10 @@ public class ChatbotService {
       String welcomeMessage,
       boolean brandVisible,
       String stylePreset,
-      String fallbackMessage) {}
+      boolean allowDirectModel,
+      String fallbackMessage,
+      String providerCode,
+      String modelCode,
+      String embeddingProviderCode,
+      String embeddingModelCode) {}
 }

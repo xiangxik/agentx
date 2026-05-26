@@ -59,9 +59,9 @@ describe('chat-page app', () => {
 
   it('renders title', async () => {
     render(<App />);
-    expect(screen.getByRole('heading', { name: 'AgentX 智能接待中心' })).toBeInTheDocument();
+    expect(screen.getByLabelText(/AgentX 智能接待中心/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('欢迎来到 AgentX。')).toBeInTheDocument());
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(sockets[0].url).toContain('chatbotPublicCode=demo-bot');
+    expect(sockets[0].url).toContain('chatbotPublicCode=6370fe97-8eb7-4e23-83ea-66d4514c95c0');
   });
 });

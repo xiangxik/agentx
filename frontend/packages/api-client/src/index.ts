@@ -122,6 +122,121 @@ export interface TenantQuotaOverview {
   usage: Record<string, number>;
 }
 
+export interface ModelProviderSummary {
+  id: number;
+  providerCode: string;
+  displayName: string;
+  apiEndpoint: string | null;
+  apiKeyHint: string | null;
+  status: 'ACTIVE' | 'DISABLED';
+  supports: string;
+  transport: 'BUILTIN' | 'OPENAI_COMPATIBLE' | 'AZURE_OPENAI' | 'ANTHROPIC' | 'QWEN_DASHSCOPE';
+  apiKeyEnvVar: string | null;
+  apiVersion: string | null;
+}
+
+export interface CreateModelProviderRequest {
+  providerCode: string;
+  displayName: string;
+  apiEndpoint: string;
+  apiKey?: string;
+  status: ModelProviderSummary['status'];
+  supports: string;
+  transport: ModelProviderSummary['transport'];
+  apiKeyEnvVar?: string;
+  apiVersion?: string;
+}
+
+export interface ModelAnalyticsOverview {
+  totalCalls: number;
+  successCalls: number;
+  failedCalls: number;
+  failureRate: number;
+  totalTokens: number;
+  totalCost: number;
+  avgLatencyMs: number;
+  trends: {
+    totalCalls: TrendMetric;
+    totalTokens: TrendMetric;
+    totalCost: TrendMetric;
+    failureRate: TrendMetric;
+  } | null;
+  providers: Array<{
+    providerCode: string;
+    totalCalls: number;
+    failedCalls: number;
+    failureRate: number;
+    totalTokens: number;
+    totalCost: number;
+    avgLatencyMs: number;
+    trends: RankingTrendMetric | null;
+  }>;
+  models: Array<{
+    providerCode: string;
+    modelCode: string;
+    totalCalls: number;
+    failedCalls: number;
+    failureRate: number;
+    totalTokens: number;
+    totalCost: number;
+    avgLatencyMs: number;
+    trends: RankingTrendMetric | null;
+  }>;
+}
+
+export interface TrendMetric {
+  currentValue: number;
+  previousValue: number;
+  deltaValue: number;
+  deltaPercent: number | null;
+}
+
+export interface RankingTrendMetric {
+  totalCalls: TrendMetric;
+  totalTokens: TrendMetric;
+  totalCost: TrendMetric;
+  failureRate: TrendMetric;
+}
+
+export interface GetModelAnalyticsRequest {
+  tenantId?: number;
+  providerCode?: string;
+  modelCode?: string;
+  createdFrom?: string;
+  createdTo?: string;
+  rowLimit?: number;
+}
+
+export interface ModelDefinitionSummary {
+  id: number;
+  providerId: number;
+  providerCode: string;
+  modelCode: string;
+  displayName: string;
+  purpose: 'CHAT_COMPLETION' | 'EMBEDDING';
+  status: 'ACTIVE' | 'DISABLED';
+  isDefault: boolean;
+  inputPricePer1k: number | null;
+  outputPricePer1k: number | null;
+  maxTokens: number;
+}
+
+export interface CreateModelDefinitionRequest {
+  modelCode: string;
+  displayName: string;
+  purpose: ModelDefinitionSummary['purpose'];
+  status: ModelDefinitionSummary['status'];
+  isDefault: boolean;
+  inputPricePer1k: number | null;
+  outputPricePer1k: number | null;
+  maxTokens: number;
+}
+
+export interface AvailableModelOption {
+  modelCode: string;
+  displayName: string;
+}
+
 export interface AuditLogSummary {
   id: number;
   tenantId: number | null;
@@ -149,6 +264,11 @@ export interface ChatbotSummary {
   themeColor: string;
   welcomeMessage: string;
   fallbackMessage: string;
+  allowDirectModel: boolean;
+  providerCode: string | null;
+  modelCode: string | null;
+  embeddingProviderCode: string | null;
+  embeddingModelCode: string | null;
 }
 
 export interface CreateChatbotRequest {
@@ -173,6 +293,10 @@ export interface ChatbotDetail extends ChatbotSummary {
   allowDirectModel: boolean;
   allowFeedback: boolean;
   allowHandoff: boolean;
+  providerCode: string | null;
+  modelCode: string | null;
+  embeddingProviderCode: string | null;
+  embeddingModelCode: string | null;
 }
 
 export interface UpdateChatbotAppearanceRequest {
@@ -188,6 +312,10 @@ export interface UpdateChatbotBehaviorRequest {
   allowDirectModel: boolean;
   allowFeedback: boolean;
   allowHandoff: boolean;
+  providerCode?: string;
+  modelCode?: string;
+  embeddingProviderCode?: string;
+  embeddingModelCode?: string;
 }
 
 export interface FaqSummary {
@@ -300,12 +428,55 @@ export interface ConversationMessage {
   status: string;
   content: string;
   metadata: Record<string, unknown>;
+  sourceType: string | null;
+  language: string | null;
+  faqId: number | null;
+  knowledgeSourceId: number | null;
+  knowledgeScore: number | null;
+  citations: Array<{
+    sourceId: number | null;
+    title: string | null;
+    sourceType: string | null;
+    sourceLink: string | null;
+  }>;
+  model: {
+    logId: number | null;
+    provider: string | null;
+    model: string | null;
+    mode: string | null;
+    promptTokens: number | null;
+    completionTokens: number | null;
+    totalTokens: number | null;
+    estimatedCost: number | null;
+  } | null;
   createdAt: string;
 }
 
 export interface ConversationDetail extends Omit<ConversationSummary, 'latestMessage' | 'messageCount'> {
-  metadata: Record<string, unknown>;
+  metadata: {
+    domain: string | null;
+    ipAddress: string | null;
+    userAgent: string | null;
+    chatbotPublicCode: string | null;
+    chatbotName: string | null;
+    raw: Record<string, unknown>;
+  };
   messages: ConversationMessage[];
+  modelCalls: Array<{
+    id: number;
+    provider: string;
+    model: string;
+    purpose: string;
+    status: string;
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    estimatedCost: number;
+    latencyMs: number;
+    errorMessage: string | null;
+    metadata: Record<string, unknown>;
+    createdAt: string;
+  }>;
 }
 
 export interface TenantAdminSummary {
@@ -446,6 +617,166 @@ export async function getTenantPlanAssignment(token: string, tenantId: number): 
 export async function getTenantQuotaOverview(token: string): Promise<TenantQuotaOverview> {
   return apiRequest<TenantQuotaOverview>({
     path: '/api/admin/quota',
+    token
+  });
+}
+
+export async function listModelProviders(token: string): Promise<ModelProviderSummary[]> {
+  return apiRequest<ModelProviderSummary[]>({
+    path: '/api/admin/model-providers',
+    token
+  });
+}
+
+export async function getModelAnalytics(
+  token: string,
+  request?: GetModelAnalyticsRequest
+): Promise<ModelAnalyticsOverview> {
+  const searchParams = new URLSearchParams();
+  if (request?.tenantId != null) {
+    searchParams.set('tenantId', String(request.tenantId));
+  }
+  if (request?.providerCode) {
+    searchParams.set('providerCode', request.providerCode);
+  }
+  if (request?.modelCode) {
+    searchParams.set('modelCode', request.modelCode);
+  }
+  if (request?.createdFrom) {
+    searchParams.set('createdFrom', request.createdFrom);
+  }
+  if (request?.createdTo) {
+    searchParams.set('createdTo', request.createdTo);
+  }
+  if (request?.rowLimit != null) {
+    searchParams.set('rowLimit', String(request.rowLimit));
+  }
+  return apiRequest<ModelAnalyticsOverview>({
+    path: `/api/admin/model-analytics${searchParams.size > 0 ? `?${searchParams.toString()}` : ''}`,
+    token
+  });
+}
+
+export async function exportModelAnalytics(
+  token: string,
+  request?: GetModelAnalyticsRequest
+): Promise<Blob> {
+  const searchParams = new URLSearchParams();
+  if (request?.tenantId != null) {
+    searchParams.set('tenantId', String(request.tenantId));
+  }
+  if (request?.providerCode) {
+    searchParams.set('providerCode', request.providerCode);
+  }
+  if (request?.modelCode) {
+    searchParams.set('modelCode', request.modelCode);
+  }
+  if (request?.createdFrom) {
+    searchParams.set('createdFrom', request.createdFrom);
+  }
+  if (request?.createdTo) {
+    searchParams.set('createdTo', request.createdTo);
+  }
+  if (request?.rowLimit != null) {
+    searchParams.set('rowLimit', String(request.rowLimit));
+  }
+
+  const response = await fetch(
+    `${resolveBaseUrl()}/api/admin/model-analytics/export${searchParams.size > 0 ? `?${searchParams.toString()}` : ''}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
+
+  if (!response.ok) {
+    const contentType = response.headers.get('Content-Type') ?? '';
+    const responseBody = contentType.includes('application/json') ? await response.json() : null;
+    throw new ApiRequestError(response.status, responseBody?.code);
+  }
+
+  return response.blob();
+}
+
+export async function createModelProvider(
+  token: string,
+  request: CreateModelProviderRequest
+): Promise<ModelProviderSummary> {
+  return apiRequest<ModelProviderSummary, CreateModelProviderRequest>({
+    path: '/api/admin/model-providers',
+    method: 'POST',
+    body: request,
+    token
+  });
+}
+
+export async function updateModelProviderStatus(
+  token: string,
+  providerId: number,
+  status: ModelProviderSummary['status']
+): Promise<ModelProviderSummary> {
+  return apiRequest<ModelProviderSummary, { status: ModelProviderSummary['status'] }>({
+    path: `/api/admin/model-providers/${providerId}/status`,
+    method: 'PATCH',
+    body: { status },
+    token
+  });
+}
+
+export async function listModelDefinitions(
+  token: string,
+  purpose?: ModelDefinitionSummary['purpose']
+): Promise<ModelDefinitionSummary[]> {
+  return apiRequest<ModelDefinitionSummary[]>({
+    path: `/api/admin/model-providers/models${purpose ? `?purpose=${purpose}` : ''}`,
+    token
+  });
+}
+
+export async function createModelDefinition(
+  token: string,
+  providerId: number,
+  request: CreateModelDefinitionRequest
+): Promise<ModelDefinitionSummary> {
+  return apiRequest<ModelDefinitionSummary, CreateModelDefinitionRequest>({
+    path: `/api/admin/model-providers/${providerId}/models`,
+    method: 'POST',
+    body: request,
+    token
+  });
+}
+
+export async function listAvailableProviderModels(
+  token: string,
+  providerId: number
+): Promise<AvailableModelOption[]> {
+  return apiRequest<AvailableModelOption[]>({
+    path: `/api/admin/model-providers/${providerId}/available-models`,
+    token
+  });
+}
+
+export async function updateModelDefinitionStatus(
+  token: string,
+  modelId: number,
+  status: ModelDefinitionSummary['status']
+): Promise<ModelDefinitionSummary> {
+  return apiRequest<ModelDefinitionSummary, { status: ModelDefinitionSummary['status'] }>({
+    path: `/api/admin/model-providers/models/${modelId}/status`,
+    method: 'PATCH',
+    body: { status },
+    token
+  });
+}
+
+export async function setDefaultModelDefinition(
+  token: string,
+  modelId: number
+): Promise<ModelDefinitionSummary> {
+  return apiRequest<ModelDefinitionSummary>({
+    path: `/api/admin/model-providers/models/${modelId}/default`,
+    method: 'PATCH',
     token
   });
 }
@@ -823,7 +1154,10 @@ export async function getConversation(token: string, conversationId: number): Pr
   });
 }
 
-export async function exportConversation(token: string, conversationId: number): Promise<Blob> {
+export async function exportConversation(
+  token: string,
+  conversationId: number
+): Promise<{ blob: Blob; fileName: string | null }> {
   const response = await fetch(`${resolveBaseUrl()}/api/admin/conversations/${conversationId}/export`, {
     headers: {
       Authorization: `Bearer ${token}`
@@ -836,7 +1170,13 @@ export async function exportConversation(token: string, conversationId: number):
     throw new ApiRequestError(response.status, responseBody?.code);
   }
 
-  return response.blob();
+  const blob = await response.blob();
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const fileNameMatch = disposition.match(/filename="?([^";]+)"?/i);
+  return {
+    blob,
+    fileName: fileNameMatch ? fileNameMatch[1] : null
+  };
 }
 
 export async function updateConversationStatus(

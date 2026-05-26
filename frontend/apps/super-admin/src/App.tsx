@@ -4,13 +4,21 @@ import { useEffect, useState } from 'react';
 import { AdminShell, SectionHeader, StatCard } from '@agentx/admin-ui';
 import {
   ApiRequestError,
+  type AvailableModelOption,
   type AuthSession,
   assignTenantPlan,
+  createModelDefinition,
+  createModelProvider,
+  exportModelAnalytics,
   createTenant,
   createPlan,
   getAuditLog,
+  getModelAnalytics,
   getTenantPlanAssignment,
   getTenant,
+  listAvailableProviderModels,
+  listModelDefinitions,
+  listModelProviders,
   listAuditLogs,
   listPlans,
   login,
@@ -19,9 +27,18 @@ import {
   type AuditLogSummary,
   type CreateTenantRequest,
   type CreatePlanRequest,
+  type CreateModelDefinitionRequest,
+  type GetModelAnalyticsRequest,
+  type CreateModelProviderRequest,
+  type ModelDefinitionSummary,
+  type ModelAnalyticsOverview,
+  type ModelProviderSummary,
   type PlanSummary,
   type TenantDetail,
   type TenantSummary,
+  setDefaultModelDefinition,
+  updateModelDefinitionStatus,
+  updateModelProviderStatus,
   updatePlan,
   updatePlanStatus,
   updateTenant,
@@ -272,6 +289,28 @@ type PlanUpdateFormState = {
   name: string;
   limits: Record<string, string>;
 };
+type ModelProviderCreateFormState = CreateModelProviderRequest;
+type ModelDefinitionCreateFormState = {
+  providerId: string;
+  modelCode: string;
+  displayName: string;
+  purpose: ModelDefinitionSummary['purpose'];
+  status: ModelDefinitionSummary['status'];
+  isDefault: boolean;
+  inputPricePer1k: string;
+  outputPricePer1k: string;
+  maxTokens: string;
+};
+type AnalyticsWindowValue = '7d' | '30d' | '90d' | 'all' | 'custom';
+type AnalyticsFilterFormState = {
+  tenantId: string;
+  providerCode: string;
+  modelCode: string;
+  window: AnalyticsWindowValue;
+  createdFrom: string;
+  createdTo: string;
+  rowLimit: string;
+};
 
 const quotaFields = [
   { key: 'chatbots', label: 'Chatbot 数量' },
@@ -280,6 +319,14 @@ const quotaFields = [
   { key: 'files', label: '文件数' },
   { key: 'storageMb', label: '存储(MB)' }
 ] as const;
+
+const analyticsWindowOptions: Array<{ value: AnalyticsWindowValue; label: string }> = [
+  { value: '7d', label: '近 7 天' },
+  { value: '30d', label: '近 30 天' },
+  { value: '90d', label: '近 90 天' },
+  { value: 'all', label: '全部时间' },
+  { value: 'custom', label: '自定义区间' }
+];
 
 const emptyCreateForm = (): TenantCreateFormState => ({
   code: '',
@@ -306,6 +353,65 @@ function normalizeFormValue(value: string) {
 function normalizeOptionalValue(value: string) {
   const normalized = normalizeFormValue(value);
   return normalized;
+}
+
+function resolveAnalyticsWindow(windowValue: AnalyticsWindowValue) {
+  if (windowValue === 'all') {
+    return {};
+  }
+
+  if (windowValue === 'custom') {
+    return null;
+  }
+
+  const now = new Date();
+  const days = windowValue === '7d' ? 7 : windowValue === '30d' ? 30 : 90;
+  const createdFrom = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+  return {
+    createdFrom: createdFrom.toISOString(),
+    createdTo: now.toISOString()
+  };
+}
+
+function buildAnalyticsRequest(
+  form: AnalyticsFilterFormState
+): { request: GetModelAnalyticsRequest | null; error: string | null } {
+  const tenantId = form.tenantId.trim();
+  const providerCode = normalizeOptionalValue(form.providerCode);
+  const modelCode = normalizeOptionalValue(form.modelCode);
+  const rowLimit = form.rowLimit.trim();
+
+  if (tenantId && Number.isNaN(Number(tenantId))) {
+    return { request: null, error: 'Tenant ID 必须是数字。' };
+  }
+
+  if (rowLimit && Number.isNaN(Number(rowLimit))) {
+    return { request: null, error: 'Top N 必须是数字。' };
+  }
+
+  const presetWindow = resolveAnalyticsWindow(form.window);
+  let createdFrom = presetWindow?.createdFrom;
+  let createdTo = presetWindow?.createdTo;
+
+  if (form.window === 'custom') {
+    createdFrom = form.createdFrom ? new Date(form.createdFrom).toISOString() : undefined;
+    createdTo = form.createdTo ? new Date(form.createdTo).toISOString() : undefined;
+    if (createdFrom && createdTo && createdFrom > createdTo) {
+      return { request: null, error: '自定义时间范围无效：开始时间不能晚于结束时间。' };
+    }
+  }
+
+  return {
+    request: {
+      tenantId: tenantId ? Number(tenantId) : undefined,
+      providerCode: providerCode || undefined,
+      modelCode: modelCode || undefined,
+      createdFrom,
+      createdTo,
+      rowLimit: rowLimit ? Number(rowLimit) : undefined
+    },
+    error: null
+  };
 }
 
 function statusLabel(status: TenantSummary['status']) {
@@ -1659,6 +1765,724 @@ function PlansPage({ session }: { session: AuthSession }) {
   );
 }
 
+function ModelsPage({ session }: { session: AuthSession }) {
+  const token = session.accessToken;
+  const [tenants, setTenants] = useState<TenantSummary[]>([]);
+  const [providers, setProviders] = useState<ModelProviderSummary[]>([]);
+  const [models, setModels] = useState<ModelDefinitionSummary[]>([]);
+  const [analytics, setAnalytics] = useState<ModelAnalyticsOverview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null);
+  const [analyticsFilterForm, setAnalyticsFilterForm] = useState<AnalyticsFilterFormState>({
+    tenantId: '',
+    providerCode: '',
+    modelCode: '',
+    window: '30d',
+    createdFrom: '',
+    createdTo: '',
+    rowLimit: '8'
+  });
+  const [appliedAnalyticsFilters, setAppliedAnalyticsFilters] = useState<GetModelAnalyticsRequest>(
+    buildAnalyticsRequest({
+      tenantId: '',
+      providerCode: '',
+      modelCode: '',
+      window: '30d',
+      createdFrom: '',
+      createdTo: '',
+      rowLimit: '8'
+    }).request ?? {}
+  );
+  const [providerForm, setProviderForm] = useState<ModelProviderCreateFormState>({
+    providerCode: '',
+    displayName: '',
+    apiEndpoint: '',
+    apiKey: '',
+    status: 'ACTIVE',
+    supports: 'CHAT_COMPLETION',
+    transport: 'BUILTIN',
+    apiKeyEnvVar: '',
+    apiVersion: ''
+  });
+  const [modelForm, setModelForm] = useState<ModelDefinitionCreateFormState>({
+    providerId: '',
+    modelCode: '',
+    displayName: '',
+    purpose: 'CHAT_COMPLETION',
+    status: 'ACTIVE',
+    isDefault: true,
+    inputPricePer1k: '0',
+    outputPricePer1k: '0',
+    maxTokens: '2048'
+  });
+  const [availableProviderModels, setAvailableProviderModels] = useState<AvailableModelOption[]>([]);
+  const [availableProviderModelsLoading, setAvailableProviderModelsLoading] = useState(false);
+
+  const selectedProvider = providers.find((provider) => provider.id === selectedProviderId) ?? null;
+  const providerModels = models.filter((model) => model.providerId === selectedProviderId);
+  const analyticsModelOptions = analyticsFilterForm.providerCode
+    ? models.filter((model) => model.providerCode === analyticsFilterForm.providerCode)
+    : models;
+  const tenantNameById = new Map(tenants.map((tenant) => [tenant.id, tenant.name]));
+  const providerNameByCode = new Map(providers.map((provider) => [provider.providerCode, provider.displayName]));
+  const modelNameByKey = new Map(models.map((model) => [`${model.providerCode}::${model.modelCode}`, model.displayName]));
+  const selectedAnalyticsTenantName =
+    appliedAnalyticsFilters.tenantId == null ? null : (tenantNameById.get(appliedAnalyticsFilters.tenantId) ?? null);
+  const selectedAnalyticsProviderName =
+    appliedAnalyticsFilters.providerCode == null ? null : (providerNameByCode.get(appliedAnalyticsFilters.providerCode) ?? null);
+  const selectedAnalyticsModelName =
+    appliedAnalyticsFilters.providerCode == null || appliedAnalyticsFilters.modelCode == null
+      ? null
+      : (modelNameByKey.get(`${appliedAnalyticsFilters.providerCode}::${appliedAnalyticsFilters.modelCode}`) ?? null);
+
+  const formatTrendPercent = (value: number | null) => {
+    if (value == null) {
+      return 'n/a';
+    }
+    return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+  };
+
+  const formatTrendDelta = (value: number, fractionDigits = 0) =>
+    `${value >= 0 ? '+' : ''}${value.toFixed(fractionDigits)}`;
+
+  const buildTrendLabel = (value: number | null, digits = 0, suffix = '') => {
+    if (value == null) {
+      return '无对比基线';
+    }
+    return `环比 ${formatTrendPercent(value)}${suffix ? ` / ${suffix}` : ''}`;
+  };
+
+  const loadData = async (
+    preferredProviderId?: number,
+    analyticsRequest: GetModelAnalyticsRequest = appliedAnalyticsFilters
+  ) => {
+    setLoading(true);
+    setErrorMessage(null);
+    try {
+      const [nextTenants, nextProviders, nextModels, nextAnalytics] = await Promise.all([
+        listTenants(token),
+        listModelProviders(token),
+        listModelDefinitions(token),
+        getModelAnalytics(token, analyticsRequest)
+      ]);
+      setTenants(nextTenants);
+      setProviders(nextProviders);
+      setModels(nextModels);
+      setAnalytics(nextAnalytics);
+      const nextSelectedProviderId =
+        preferredProviderId ??
+        (nextProviders.some((provider) => provider.id === selectedProviderId)
+          ? selectedProviderId
+          : (nextProviders[0]?.id ?? null));
+      setSelectedProviderId(nextSelectedProviderId);
+      setModelForm((current) => ({
+        ...current,
+        providerId: nextSelectedProviderId == null ? '' : String(nextSelectedProviderId)
+      }));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : '模型数据加载失败。');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadData();
+  }, [token, appliedAnalyticsFilters]);
+
+  const handleApplyAnalyticsFilters = () => {
+    const nextRequest = buildAnalyticsRequest(analyticsFilterForm);
+    if (nextRequest.error) {
+      setErrorMessage(nextRequest.error);
+      return;
+    }
+    setErrorMessage(null);
+    setAppliedAnalyticsFilters(nextRequest.request ?? {});
+  };
+
+  const handleResetAnalyticsFilters = () => {
+    const nextForm = {
+      tenantId: '',
+      providerCode: '',
+      modelCode: '',
+      window: '30d' as AnalyticsWindowValue,
+      createdFrom: '',
+      createdTo: '',
+      rowLimit: '8'
+    };
+    setAnalyticsFilterForm(nextForm);
+    setErrorMessage(null);
+    setAppliedAnalyticsFilters(buildAnalyticsRequest(nextForm).request ?? {});
+  };
+
+  const handleExportAnalytics = async () => {
+    setSubmitting(true);
+    setErrorMessage(null);
+    setNotice(null);
+    try {
+      const exportBlob = await exportModelAnalytics(token, appliedAnalyticsFilters);
+      const objectUrl = window.URL.createObjectURL(exportBlob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = 'model-analytics.csv';
+      anchor.click();
+      window.URL.revokeObjectURL(objectUrl);
+      setNotice('模型统计已导出为 CSV。');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : '模型统计导出失败。');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCreateProvider = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setErrorMessage(null);
+    setNotice(null);
+    try {
+      const created = await createModelProvider(token, {
+        providerCode: normalizeFormValue(providerForm.providerCode),
+        displayName: normalizeFormValue(providerForm.displayName),
+        apiEndpoint: normalizeOptionalValue(providerForm.apiEndpoint),
+        apiKey: normalizeOptionalValue(providerForm.apiKey ?? ''),
+        status: providerForm.status,
+        supports: normalizeOptionalValue(providerForm.supports),
+        transport: providerForm.transport,
+        apiKeyEnvVar: normalizeOptionalValue(providerForm.apiKeyEnvVar ?? ''),
+        apiVersion: normalizeOptionalValue(providerForm.apiVersion ?? '')
+      });
+      setProviderForm({
+        providerCode: '',
+        displayName: '',
+        apiEndpoint: '',
+        apiKey: '',
+        status: 'ACTIVE',
+        supports: 'CHAT_COMPLETION',
+        transport: 'BUILTIN',
+        apiKeyEnvVar: '',
+        apiVersion: ''
+      });
+      setNotice(`Provider ${created.displayName} 已创建。`);
+      await loadData(created.id, appliedAnalyticsFilters);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Provider 创建失败。');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCreateModel = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!modelForm.providerId) {
+      setErrorMessage('请先选择 provider。');
+      return;
+    }
+    setSubmitting(true);
+    setErrorMessage(null);
+    setNotice(null);
+    try {
+      const created = await createModelDefinition(token, Number(modelForm.providerId), {
+        modelCode: normalizeFormValue(modelForm.modelCode),
+        displayName: normalizeFormValue(modelForm.displayName),
+        purpose: modelForm.purpose,
+        status: modelForm.status,
+        isDefault: modelForm.isDefault,
+        inputPricePer1k: Number(modelForm.inputPricePer1k),
+        outputPricePer1k: Number(modelForm.outputPricePer1k),
+        maxTokens: Number(modelForm.maxTokens)
+      });
+      setModelForm((current) => ({
+        ...current,
+        modelCode: '',
+        displayName: '',
+        inputPricePer1k: '0',
+        outputPricePer1k: '0',
+        maxTokens: '2048'
+      }));
+      setNotice(`模型 ${created.displayName} 已创建。`);
+      await loadData(Number(modelForm.providerId), appliedAnalyticsFilters);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : '模型创建失败。');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const loadAvailableModels = async (providerIdValue: string) => {
+    if (!providerIdValue) {
+      setAvailableProviderModels([]);
+      return;
+    }
+
+    setAvailableProviderModelsLoading(true);
+    try {
+      const nextOptions = await listAvailableProviderModels(token, Number(providerIdValue));
+      setAvailableProviderModels(nextOptions);
+    } catch (error) {
+      setAvailableProviderModels([]);
+      setErrorMessage(error instanceof Error ? error.message : '可选模型加载失败。');
+    } finally {
+      setAvailableProviderModelsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadAvailableModels(modelForm.providerId);
+  }, [token, modelForm.providerId]);
+
+  const handleProviderStatusChange = async (providerId: number, status: ModelProviderSummary['status']) => {
+    setSubmitting(true);
+    setErrorMessage(null);
+    setNotice(null);
+    try {
+      const updated = await updateModelProviderStatus(token, providerId, status);
+      setNotice(`Provider ${updated.displayName} 状态已更新为 ${updated.status}。`);
+      await loadData(providerId, appliedAnalyticsFilters);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Provider 状态更新失败。');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleModelStatusChange = async (modelId: number, status: ModelDefinitionSummary['status']) => {
+    setSubmitting(true);
+    setErrorMessage(null);
+    setNotice(null);
+    try {
+      const updated = await updateModelDefinitionStatus(token, modelId, status);
+      setNotice(`模型 ${updated.displayName} 状态已更新为 ${updated.status}。`);
+      await loadData(updated.providerId, appliedAnalyticsFilters);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : '模型状态更新失败。');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSetDefaultModel = async (modelId: number) => {
+    setSubmitting(true);
+    setErrorMessage(null);
+    setNotice(null);
+    try {
+      const updated = await setDefaultModelDefinition(token, modelId);
+      setNotice(`模型 ${updated.displayName} 已设为默认。`);
+      await loadData(updated.providerId, appliedAnalyticsFilters);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : '默认模型更新失败。');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <SectionHeader title="模型供应商" />
+
+      <section style={{ marginBottom: 20, borderRadius: 20, background: '#fff', boxShadow: '0 18px 50px rgba(15, 23, 42, 0.08)', padding: 20, display: 'grid', gap: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div>
+            <strong>统计筛选</strong>
+            <div style={{ color: '#64748b', marginTop: 6 }}>支持租户、provider、model 过滤，以及预设或自定义时间区间。</div>
+          </div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <button type="button" onClick={() => void handleExportAnalytics()} style={{ borderRadius: 999, border: 0, background: '#475569', color: '#fff', padding: '10px 16px', cursor: 'pointer' }}>导出 CSV</button>
+            <button type="button" onClick={handleApplyAnalyticsFilters} style={{ borderRadius: 999, border: 0, background: '#1d4ed8', color: '#fff', padding: '10px 16px', cursor: 'pointer' }}>应用筛选</button>
+            <button type="button" onClick={handleResetAnalyticsFilters} style={{ borderRadius: 999, border: '1px solid #cbd5e1', background: '#fff', color: '#334155', padding: '10px 16px', cursor: 'pointer' }}>重置</button>
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 14 }}>
+          <Field label="Tenant">
+            <select
+              value={analyticsFilterForm.tenantId}
+              onChange={(event) => setAnalyticsFilterForm((current) => ({ ...current, tenantId: event.target.value }))}
+              style={inputStyle()}
+            >
+              <option value="">全部租户</option>
+              {tenants.map((tenant) => (
+                <option key={tenant.id} value={tenant.id}>{tenant.name}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Provider">
+            <select
+              value={analyticsFilterForm.providerCode}
+              onChange={(event) =>
+                setAnalyticsFilterForm((current) => ({
+                  ...current,
+                  providerCode: event.target.value,
+                  modelCode:
+                    current.modelCode &&
+                    !models.some(
+                      (model) =>
+                        model.providerCode === event.target.value && model.modelCode === current.modelCode
+                    )
+                      ? ''
+                      : current.modelCode
+                }))
+              }
+              style={inputStyle()}
+            >
+              <option value="">全部 Provider</option>
+              {providers.map((provider) => (
+                <option key={provider.id} value={provider.providerCode}>{provider.displayName}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Model">
+            <select
+              value={analyticsFilterForm.modelCode}
+              onChange={(event) => setAnalyticsFilterForm((current) => ({ ...current, modelCode: event.target.value }))}
+              style={inputStyle()}
+            >
+              <option value="">全部 Model</option>
+              {analyticsModelOptions.map((model) => (
+                <option key={`${model.providerCode}-${model.modelCode}-${model.id}`} value={model.modelCode}>{model.displayName}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="时间窗口">
+            <select
+              value={analyticsFilterForm.window}
+              onChange={(event) =>
+                setAnalyticsFilterForm((current) => ({
+                  ...current,
+                  window: event.target.value as AnalyticsWindowValue,
+                  createdFrom:
+                    event.target.value === 'custom' ? current.createdFrom : '',
+                  createdTo:
+                    event.target.value === 'custom' ? current.createdTo : ''
+                }))
+              }
+              style={inputStyle()}
+            >
+              {analyticsWindowOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Top N">
+            <select
+              value={analyticsFilterForm.rowLimit}
+              onChange={(event) => setAnalyticsFilterForm((current) => ({ ...current, rowLimit: event.target.value }))}
+              style={inputStyle()}
+            >
+              <option value="5">Top 5</option>
+              <option value="8">Top 8</option>
+              <option value="10">Top 10</option>
+              <option value="20">Top 20</option>
+            </select>
+          </Field>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14, gridColumn: analyticsFilterForm.window === 'custom' ? 'span 1' : 'span 1' }}>
+            <Field label="开始时间">
+              <input
+                type="datetime-local"
+                disabled={analyticsFilterForm.window !== 'custom'}
+                value={analyticsFilterForm.createdFrom}
+                onChange={(event) => setAnalyticsFilterForm((current) => ({ ...current, createdFrom: event.target.value }))}
+                style={inputStyle()}
+              />
+            </Field>
+            <Field label="结束时间">
+              <input
+                type="datetime-local"
+                disabled={analyticsFilterForm.window !== 'custom'}
+                value={analyticsFilterForm.createdTo}
+                onChange={(event) => setAnalyticsFilterForm((current) => ({ ...current, createdTo: event.target.value }))}
+                style={inputStyle()}
+              />
+            </Field>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', color: '#475569', fontSize: 13 }}>
+          <span>当前筛选租户：{selectedAnalyticsTenantName ?? '全部'}</span>
+          <span>Provider：{selectedAnalyticsProviderName ?? '全部'}</span>
+          <span>Model：{selectedAnalyticsModelName ?? '全部'}</span>
+          <span>Top N：{appliedAnalyticsFilters.rowLimit ?? 8}</span>
+        </div>
+      </section>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 16, marginBottom: 20 }}>
+        <StatCard title="总调用" value={analytics == null ? '-' : String(analytics.totalCalls)} description="模型调用日志总数。" />
+        <StatCard title="失败率" value={analytics == null ? '-' : `${analytics.failureRate.toFixed(1)}%`} description="失败调用占比。" />
+        <StatCard title="Token 总量" value={analytics == null ? '-' : String(analytics.totalTokens)} description="累计 prompt + completion tokens。" />
+        <StatCard title="成本估算" value={analytics == null ? '-' : analytics.totalCost.toFixed(4)} description="按模型价格快照估算。" />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 16, marginBottom: 20 }}>
+        <StatCard
+          title="调用趋势"
+          value={analytics?.trends == null ? '-' : formatTrendDelta(analytics.trends.totalCalls.deltaValue)}
+          description={analytics?.trends == null ? '只有完整时间窗口时才显示对比。' : `上一窗口 ${analytics.trends.totalCalls.previousValue.toFixed(0)}，环比 ${formatTrendPercent(analytics.trends.totalCalls.deltaPercent)}`}
+        />
+        <StatCard
+          title="失败率趋势"
+          value={analytics?.trends == null ? '-' : `${formatTrendDelta(analytics.trends.failureRate.deltaValue, 1)}%`}
+          description={analytics?.trends == null ? '只有完整时间窗口时才显示对比。' : `上一窗口 ${analytics.trends.failureRate.previousValue.toFixed(1)}%，环比 ${formatTrendPercent(analytics.trends.failureRate.deltaPercent)}`}
+        />
+        <StatCard
+          title="Token 趋势"
+          value={analytics?.trends == null ? '-' : formatTrendDelta(analytics.trends.totalTokens.deltaValue)}
+          description={analytics?.trends == null ? '只有完整时间窗口时才显示对比。' : `上一窗口 ${analytics.trends.totalTokens.previousValue.toFixed(0)}，环比 ${formatTrendPercent(analytics.trends.totalTokens.deltaPercent)}`}
+        />
+        <StatCard
+          title="成本趋势"
+          value={analytics?.trends == null ? '-' : formatTrendDelta(analytics.trends.totalCost.deltaValue, 4)}
+          description={analytics?.trends == null ? '只有完整时间窗口时才显示对比。' : `上一窗口 ${analytics.trends.totalCost.previousValue.toFixed(4)}，环比 ${formatTrendPercent(analytics.trends.totalCost.deltaPercent)}`}
+        />
+      </div>
+
+      {errorMessage ? (
+        <div role="alert" style={{ marginBottom: 16, borderRadius: 16, background: '#fef2f2', color: '#b91c1c', padding: 14 }}>
+          {errorMessage}
+        </div>
+      ) : null}
+
+      {notice ? (
+        <div style={{ marginBottom: 16, borderRadius: 16, background: '#eff6ff', color: '#1d4ed8', padding: 14 }}>{notice}</div>
+      ) : null}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(360px, 1fr) minmax(420px, 1.2fr)', gap: 20 }}>
+        <section style={{ display: 'grid', gap: 16 }}>
+          <div style={{ background: '#fff', borderRadius: 20, boxShadow: '0 18px 50px rgba(15, 23, 42, 0.08)', overflow: 'hidden' }}>
+            <div style={{ padding: 18, borderBottom: '1px solid #e2e8f0' }}>
+              <strong>Provider 列表</strong>
+              <p style={{ marginBottom: 0, color: '#64748b' }}>配置内置 provider 或 OpenAI 兼容供应商接入。</p>
+            </div>
+            {loading ? (
+              <div style={{ padding: 18, color: '#64748b' }}>加载中...</div>
+            ) : providers.length === 0 ? (
+              <div style={{ padding: 18, color: '#64748b' }}>还没有 provider，先创建一个。</div>
+            ) : (
+              <div style={{ display: 'grid' }}>
+                {providers.map((provider) => {
+                  const active = provider.id === selectedProviderId;
+                  return (
+                    <button
+                      key={provider.id}
+                      type="button"
+                      onClick={() => setSelectedProviderId(provider.id)}
+                      style={{ display: 'grid', gap: 8, textAlign: 'left', padding: 18, border: 0, borderBottom: '1px solid #e2e8f0', background: active ? '#eff6ff' : '#fff', cursor: 'pointer' }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <div>
+                          <strong>{provider.displayName}</strong>
+                          <div style={{ color: '#64748b', fontSize: 13 }}>{provider.providerCode}</div>
+                        </div>
+                        <span style={{ borderRadius: 999, padding: '4px 10px', fontSize: 12, fontWeight: 700, color: provider.status === 'ACTIVE' ? '#166534' : '#991b1b', background: provider.status === 'ACTIVE' ? '#dcfce7' : '#fee2e2' }}>
+                          {provider.status}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ borderRadius: 999, padding: '4px 8px', background: '#f8fafc', color: '#334155', fontSize: 12 }}>{provider.transport}</span>
+                        <span style={{ borderRadius: 999, padding: '4px 8px', background: '#f8fafc', color: '#334155', fontSize: 12 }}>{provider.supports || 'N/A'}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <TenantFormCard title="新增 Provider" description="外部供应商建议使用环境变量名，不在后台持久化明文 key。" submitLabel="创建 Provider" submitting={submitting} onSubmit={handleCreateProvider} onCancel={() => setNotice(null)}>
+            <>
+              <Field label="Provider Code"><input value={providerForm.providerCode} onChange={(event) => setProviderForm((current) => ({ ...current, providerCode: event.target.value }))} required style={inputStyle()} /></Field>
+              <Field label="显示名称"><input value={providerForm.displayName} onChange={(event) => setProviderForm((current) => ({ ...current, displayName: event.target.value }))} required style={inputStyle()} /></Field>
+              <Field label="Transport">
+                <select value={providerForm.transport} onChange={(event) => setProviderForm((current) => ({ ...current, transport: event.target.value as ModelProviderSummary['transport'] }))} style={inputStyle()}>
+                  <option value="BUILTIN">BUILTIN</option>
+                  <option value="OPENAI_COMPATIBLE">OPENAI_COMPATIBLE</option>
+                  <option value="AZURE_OPENAI">AZURE_OPENAI</option>
+                  <option value="ANTHROPIC">ANTHROPIC</option>
+                  <option value="QWEN_DASHSCOPE">QWEN_DASHSCOPE</option>
+                </select>
+              </Field>
+              <Field label="API Endpoint"><input value={providerForm.apiEndpoint} onChange={(event) => setProviderForm((current) => ({ ...current, apiEndpoint: event.target.value }))} placeholder="OpenAI/Azure 自定义端点，DashScope 默认可留空" style={inputStyle()} /></Field>
+              <Field label="API Key Env Var"><input value={providerForm.apiKeyEnvVar ?? ''} onChange={(event) => setProviderForm((current) => ({ ...current, apiKeyEnvVar: event.target.value }))} placeholder="OPENAI_API_KEY" style={inputStyle()} /></Field>
+              <Field label="API Version"><input value={providerForm.apiVersion ?? ''} onChange={(event) => setProviderForm((current) => ({ ...current, apiVersion: event.target.value }))} placeholder="Azure/Anthropic 可选，Qwen 不需要" style={inputStyle()} /></Field>
+              <Field label="API Key Hint"><input value={providerForm.apiKey ?? ''} onChange={(event) => setProviderForm((current) => ({ ...current, apiKey: event.target.value }))} placeholder="仅用于展示掩码，可留空" style={inputStyle()} /></Field>
+              <Field label="Supports"><input value={providerForm.supports} onChange={(event) => setProviderForm((current) => ({ ...current, supports: event.target.value }))} placeholder="CHAT_COMPLETION,EMBEDDING" style={inputStyle()} /></Field>
+            </>
+          </TenantFormCard>
+        </section>
+
+        <section style={{ display: 'grid', gap: 16 }}>
+          <div style={{ background: '#fff', borderRadius: 20, padding: 20, boxShadow: '0 18px 50px rgba(15, 23, 42, 0.08)', display: 'grid', gap: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+              <div>
+                <h3 style={{ margin: 0 }}>Provider 详情</h3>
+                <p style={{ marginBottom: 0, color: '#64748b' }}>查看 endpoint、env var 绑定与模型列表。</p>
+              </div>
+            </div>
+            {!selectedProvider ? (
+              <div style={{ color: '#64748b' }}>从左侧选择一个 provider。</div>
+            ) : (
+              <>
+                <div style={{ display: 'grid', gap: 8, color: '#334155' }}>
+                  <div>名称：{selectedProvider.displayName}</div>
+                  <div>Transport：{selectedProvider.transport}</div>
+                  <div>Endpoint：{selectedProvider.apiEndpoint ?? '-'}</div>
+                  <div>Env Var：{selectedProvider.apiKeyEnvVar ?? '-'}</div>
+                  <div>API Version：{selectedProvider.apiVersion ?? '-'}</div>
+                  <div>Key 掩码：{selectedProvider.apiKeyHint ?? '-'}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  <button type="button" disabled={submitting || selectedProvider.status === 'ACTIVE'} onClick={() => void handleProviderStatusChange(selectedProvider.id, 'ACTIVE')} style={{ borderRadius: 999, border: 0, background: '#166534', color: '#fff', padding: '10px 16px', cursor: 'pointer', opacity: submitting || selectedProvider.status === 'ACTIVE' ? 0.6 : 1 }}>启用 Provider</button>
+                  <button type="button" disabled={submitting || selectedProvider.status === 'DISABLED'} onClick={() => void handleProviderStatusChange(selectedProvider.id, 'DISABLED')} style={{ borderRadius: 999, border: 0, background: '#7f1d1d', color: '#fff', padding: '10px 16px', cursor: 'pointer', opacity: submitting || selectedProvider.status === 'DISABLED' ? 0.6 : 1 }}>停用 Provider</button>
+                </div>
+                <div style={{ display: 'grid', gap: 12 }}>
+                  {providerModels.length === 0 ? (
+                    <div style={{ color: '#64748b' }}>当前 provider 还没有模型定义。</div>
+                  ) : (
+                    providerModels.map((model) => (
+                      <div key={model.id} style={{ borderRadius: 14, border: '1px solid #e2e8f0', background: '#f8fafc', padding: 14, display: 'grid', gap: 6 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                          <strong>{model.displayName}</strong>
+                          <span style={{ color: model.status === 'ACTIVE' ? '#166534' : '#991b1b', fontWeight: 700 }}>{model.status}</span>
+                        </div>
+                        <div style={{ color: '#64748b' }}>{model.modelCode} / {model.purpose}</div>
+                        <div>价格：输入 {model.inputPricePer1k ?? 0} / 输出 {model.outputPricePer1k ?? 0} 每 1k tokens</div>
+                        <div>Max Tokens：{model.maxTokens}{model.isDefault ? ' / 默认模型' : ''}</div>
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                          <button type="button" disabled={submitting || model.status === 'ACTIVE'} onClick={() => void handleModelStatusChange(model.id, 'ACTIVE')} style={{ borderRadius: 999, border: 0, background: '#1d4ed8', color: '#fff', padding: '8px 14px', cursor: 'pointer', opacity: submitting || model.status === 'ACTIVE' ? 0.6 : 1 }}>启用</button>
+                          <button type="button" disabled={submitting || model.status === 'DISABLED'} onClick={() => void handleModelStatusChange(model.id, 'DISABLED')} style={{ borderRadius: 999, border: 0, background: '#b45309', color: '#fff', padding: '8px 14px', cursor: 'pointer', opacity: submitting || model.status === 'DISABLED' ? 0.6 : 1 }}>停用</button>
+                          <button type="button" disabled={submitting || model.isDefault} onClick={() => void handleSetDefaultModel(model.id)} style={{ borderRadius: 999, border: '1px solid #cbd5e1', background: '#fff', padding: '8px 14px', cursor: 'pointer', opacity: submitting || model.isDefault ? 0.6 : 1 }}>设为默认</button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          <TenantFormCard title="新增模型" description="为指定 provider 补充聊天模型定义与价格快照。" submitLabel="创建模型" submitting={submitting} onSubmit={handleCreateModel} onCancel={() => setNotice(null)}>
+            <>
+              <Field label="Provider">
+                <select value={modelForm.providerId} onChange={(event) => setModelForm((current) => ({ ...current, providerId: event.target.value, modelCode: '', displayName: '' }))} style={inputStyle()}>
+                  <option value="">请选择 Provider</option>
+                  {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}
+                </select>
+              </Field>
+              <Field label="Model Code">
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <input
+                      list="provider-model-options"
+                      value={modelForm.modelCode}
+                      onChange={(event) => {
+                        const nextModelCode = event.target.value;
+                        const matchedModel = availableProviderModels.find((model) => model.modelCode === nextModelCode);
+                        const currentMatchedModel = availableProviderModels.find((model) => model.modelCode === modelForm.modelCode);
+                        setModelForm((current) => ({
+                          ...current,
+                          modelCode: nextModelCode,
+                          displayName:
+                            matchedModel == null
+                              || (current.displayName
+                                && current.displayName !== current.modelCode
+                                && current.displayName !== currentMatchedModel?.displayName)
+                              ? current.displayName
+                              : matchedModel.displayName
+                        }));
+                      }}
+                      required
+                      style={{ ...inputStyle(), flex: 1 }}
+                      placeholder={availableProviderModels.length === 0 ? '输入模型编码，例如 qwen-plus' : '可选择或手动输入模型编码'}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void loadAvailableModels(modelForm.providerId)}
+                      disabled={!modelForm.providerId || availableProviderModelsLoading || submitting}
+                      style={{
+                        borderRadius: 999,
+                        border: '1px solid #cbd5e1',
+                        background: '#fff',
+                        padding: '8px 14px',
+                        cursor: !modelForm.providerId || availableProviderModelsLoading || submitting ? 'not-allowed' : 'pointer',
+                        opacity: !modelForm.providerId || availableProviderModelsLoading || submitting ? 0.6 : 1
+                      }}
+                    >
+                      {availableProviderModelsLoading ? '刷新中...' : '刷新'}
+                    </button>
+                  </div>
+                  <datalist id="provider-model-options">
+                    {availableProviderModels.map((model) => (
+                      <option key={model.modelCode} value={model.modelCode}>{model.displayName}</option>
+                    ))}
+                  </datalist>
+                  <div style={{ color: '#64748b', fontSize: 13 }}>
+                    {modelForm.providerId
+                      ? availableProviderModels.length > 0
+                        ? `已加载 ${availableProviderModels.length} 个可选模型，可直接选择或手动输入。`
+                        : '当前 provider 没有返回可选模型列表，仍可手动输入模型编码。'
+                      : '先选择 provider，系统会自动加载可选模型。'}
+                  </div>
+                </div>
+              </Field>
+              <Field label="显示名称"><input value={modelForm.displayName} onChange={(event) => setModelForm((current) => ({ ...current, displayName: event.target.value }))} required style={inputStyle()} /></Field>
+              <Field label="用途">
+                <select value={modelForm.purpose} onChange={(event) => setModelForm((current) => ({ ...current, purpose: event.target.value as ModelDefinitionSummary['purpose'] }))} style={inputStyle()}>
+                  <option value="CHAT_COMPLETION">CHAT_COMPLETION</option>
+                  <option value="EMBEDDING">EMBEDDING</option>
+                </select>
+              </Field>
+              <Field label="输入单价 / 1k"><input type="number" step="0.0001" value={modelForm.inputPricePer1k} onChange={(event) => setModelForm((current) => ({ ...current, inputPricePer1k: event.target.value }))} style={inputStyle()} /></Field>
+              <Field label="输出单价 / 1k"><input type="number" step="0.0001" value={modelForm.outputPricePer1k} onChange={(event) => setModelForm((current) => ({ ...current, outputPricePer1k: event.target.value }))} style={inputStyle()} /></Field>
+              <Field label="Max Tokens"><input type="number" min="1" value={modelForm.maxTokens} onChange={(event) => setModelForm((current) => ({ ...current, maxTokens: event.target.value }))} style={inputStyle()} /></Field>
+              <label style={{ display: 'flex', gap: 10, alignItems: 'center', color: '#334155' }}>
+                <input type="checkbox" checked={modelForm.isDefault} onChange={(event) => setModelForm((current) => ({ ...current, isDefault: event.target.checked }))} />
+                设为默认聊天模型
+              </label>
+            </>
+          </TenantFormCard>
+        </section>
+      </div>
+
+      <div style={{ marginTop: 20, display: 'grid', gridTemplateColumns: 'minmax(280px, 0.9fr) minmax(420px, 1.1fr)', gap: 20 }}>
+        <section style={{ background: '#fff', borderRadius: 20, padding: 20, boxShadow: '0 18px 50px rgba(15, 23, 42, 0.08)' }}>
+          <h3 style={{ marginTop: 0 }}>Provider 概览</h3>
+          <div style={{ display: 'grid', gap: 12 }}>
+            {(analytics?.providers ?? []).map((provider) => (
+              <div key={provider.providerCode} style={{ borderRadius: 14, border: '1px solid #e2e8f0', padding: 12, background: '#f8fafc' }}>
+                <strong>{providerNameByCode.get(provider.providerCode) ?? provider.providerCode}</strong>
+                <div style={{ color: '#64748b' }}>{provider.providerCode}</div>
+                <div>调用 {provider.totalCalls}，失败率 {provider.failureRate.toFixed(1)}%</div>
+                <div>Token {provider.totalTokens}，成本 {provider.totalCost.toFixed(4)}，平均耗时 {provider.avgLatencyMs.toFixed(0)}ms</div>
+                <div style={{ color: '#475569', fontSize: 13 }}>
+                  调用趋势 {provider.trends == null ? '无对比基线' : `${formatTrendDelta(provider.trends.totalCalls.deltaValue)} / ${buildTrendLabel(provider.trends.totalCalls.deltaPercent)}`}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section style={{ background: '#fff', borderRadius: 20, padding: 20, boxShadow: '0 18px 50px rgba(15, 23, 42, 0.08)' }}>
+          <h3 style={{ marginTop: 0 }}>模型调用排行</h3>
+          <div style={{ display: 'grid', gap: 12 }}>
+            {(analytics?.models ?? []).map((model) => (
+              <div key={`${model.providerCode}-${model.modelCode}`} style={{ borderRadius: 14, border: '1px solid #e2e8f0', padding: 12, background: '#f8fafc' }}>
+                <strong>{modelNameByKey.get(`${model.providerCode}::${model.modelCode}`) ?? model.modelCode}</strong>
+                <div style={{ color: '#64748b' }}>
+                  {(providerNameByCode.get(model.providerCode) ?? model.providerCode)} / {model.modelCode}
+                </div>
+                <div>调用 {model.totalCalls}，失败率 {model.failureRate.toFixed(1)}%，平均耗时 {model.avgLatencyMs.toFixed(0)}ms</div>
+                <div>Token {model.totalTokens}，成本 {model.totalCost.toFixed(4)}</div>
+                <div style={{ color: '#475569', fontSize: 13 }}>
+                  调用趋势 {model.trends == null ? '无对比基线' : `${formatTrendDelta(model.trends.totalCalls.deltaValue)} / ${buildTrendLabel(model.trends.totalCalls.deltaPercent)}`}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}
+
 function AuditLogsPage({ session }: { session: AuthSession }) {
   const token = session.accessToken;
   const [logs, setLogs] = useState<AuditLogSummary[]>([]);
@@ -2017,6 +2841,7 @@ function ProtectedApp({ session, onLogout }: { session: AuthSession; onLogout: (
         { to: '/', label: '平台概览' },
         { to: '/tenants', label: '租户' },
         { to: '/plans', label: '套餐' },
+        { to: '/models', label: '模型' },
         { to: '/audit', label: '审计' }
       ]}
     >
@@ -2024,6 +2849,7 @@ function ProtectedApp({ session, onLogout }: { session: AuthSession; onLogout: (
         <Route path="/" element={<Overview session={session} />} />
         <Route path="/tenants" element={<TenantsPage session={session} />} />
         <Route path="/plans" element={<PlansPage session={session} />} />
+        <Route path="/models" element={<ModelsPage session={session} />} />
         <Route path="/audit" element={<AuditLogsPage session={session} />} />
       </Routes>
     </AdminShell>

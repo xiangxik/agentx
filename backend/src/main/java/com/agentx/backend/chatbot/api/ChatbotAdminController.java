@@ -97,7 +97,11 @@ public class ChatbotAdminController {
             request.fallbackMessage(),
             request.allowDirectModel(),
             request.allowFeedback(),
-            request.allowHandoff()));
+          request.allowHandoff(),
+          request.providerCode(),
+          request.modelCode(),
+          request.embeddingProviderCode(),
+          request.embeddingModelCode()));
   }
 
   @PostMapping("/{chatbotId}/copy")
@@ -146,5 +150,9 @@ public class ChatbotAdminController {
         @NotBlank String fallbackMessage,
         boolean allowDirectModel,
         boolean allowFeedback,
-        boolean allowHandoff) {}
+      boolean allowHandoff,
+      String providerCode,
+      String modelCode,
+      String embeddingProviderCode,
+      String embeddingModelCode) {}
 }

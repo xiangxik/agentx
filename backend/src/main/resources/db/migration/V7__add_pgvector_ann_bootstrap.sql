@@ -1,0 +1,2 @@
+-- ANN indexes are created per embedding dimension at runtime by KnowledgeChunkVectorIndexManager.
+-- This migration intentionally reserves the schema version so Flyway tracks the rollout.

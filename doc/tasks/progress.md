@@ -34,7 +34,7 @@
   - [ ] 前端
   - [x] 后端
   - [x] 测试
-- [ ] 知识库模块（`knowledge-base.md`）
+- [ ] 知识库模块（`knowledge-base.md`，已完成知识切分后写入 embedding 引用、JSON 向量载荷、向量维度与 PostgreSQL 原生 `pgvector` 列，同步启用 PostgreSQL+pgvector 的数据库侧相似度检索、维度过滤、基础范围索引与按维度 HNSW ANN 索引引导，以及来源限定检索；知识 refresh 与 query 已可跟随 chatbot 级 embedding 模型配置；异步处理仍未完成）
   - [ ] 前端
   - [ ] 后端
   - [ ] 测试
@@ -42,10 +42,10 @@
   - [x] 前端
   - [x] 后端
   - [x] 测试
-- [ ] 模型供应商与模型调用模块（`model-provider.md`）
-  - [ ] 前端
+- [ ] 模型供应商与模型调用模块（`model-provider.md`，已完成超级管理员模型供应商/模型管理页、租户端模型选择展示、模型调用统计概览，以及知识库切分与检索阶段的 EMBEDDING 引用/日志接入；OpenAI 兼容、Azure 与 QWEN_DASHSCOPE 向量模型已可调用，知识检索阶段的 query-time embedding 日志已补齐，chatbot 级 embedding provider/model 选择已接入，且未接入 embedding 协议的 transport 会被显式拒绝，但更完整的 provider 治理能力仍待完成）
+  - [x] 前端
   - [ ] 后端
-  - [ ] 测试
+  - [x] 测试
 - [ ] 会话记录与数据管理模块（`conversation-data.md`，已完成会话初始化、消息落库与会话详情查询基础能力，治理与导出未完成）
   - [ ] 前端
   - [x] 后端

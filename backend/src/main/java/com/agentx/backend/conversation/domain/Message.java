@@ -35,7 +35,7 @@ public class Message {
   @Column(nullable = false)
   private String content;
 
-  @Column(name = "metadata_json", nullable = false)
+  @Column(name = "metadata_json", nullable = false, columnDefinition = "TEXT")
   private String metadataJson;
 
   @Column(name = "created_at", nullable = false)

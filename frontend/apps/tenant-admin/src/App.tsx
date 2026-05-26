@@ -6,6 +6,8 @@ import {
   ApiRequestError,
   type AuthSession,
   type ChatbotDetail,
+  type ModelDefinitionSummary,
+  type ModelProviderSummary,
   type ChatbotSummary,
   copyChatbot,
   deleteChatbot,
@@ -33,6 +35,8 @@ import {
   type KnowledgeSourceSummary,
   type ImportFaqResult,
   listChatbots,
+  listModelDefinitions,
+  listModelProviders,
   listFaqs,
   listKnowledgeSources,
   login,
@@ -167,6 +171,45 @@ function statusColor(status: string) {
   }
 
   return { color: '#92400e', background: '#fef3c7', label: '草稿' };
+}
+
+function describeDirectModel(chatbot: Pick<ChatbotSummary, 'allowDirectModel' | 'providerCode' | 'modelCode'>) {
+  if (!chatbot.allowDirectModel) {
+    return '关闭';
+  }
+
+  if (chatbot.providerCode && chatbot.modelCode) {
+    return `${chatbot.providerCode} / ${chatbot.modelCode}`;
+  }
+
+  return '系统默认模型';
+}
+
+function describeEmbeddingModel(chatbot: Pick<ChatbotSummary, 'embeddingProviderCode' | 'embeddingModelCode'>) {
+  if (chatbot.embeddingProviderCode && chatbot.embeddingModelCode) {
+    return `${chatbot.embeddingProviderCode} / ${chatbot.embeddingModelCode}`;
+  }
+
+  return '系统默认 Embedding';
+}
+
+function describeConversationModelSummary(conversation: ConversationDetail) {
+  if (conversation.modelCalls.length === 0) {
+    return {
+      latest: '未命中模型调用',
+      totalTokens: 0,
+      totalCost: 0,
+      successfulCalls: 0
+    };
+  }
+
+  const latestCall = conversation.modelCalls[conversation.modelCalls.length - 1];
+  return {
+    latest: `${latestCall.provider} / ${latestCall.model}`,
+    totalTokens: conversation.modelCalls.reduce((sum, call) => sum + call.totalTokens, 0),
+    totalCost: conversation.modelCalls.reduce((sum, call) => sum + call.estimatedCost, 0),
+    successfulCalls: conversation.modelCalls.filter((call) => call.status === 'SUCCESS').length
+  };
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -456,6 +499,9 @@ function ChatbotsPage({ session }: { session: AuthSession }) {
   const tenantId = session.tenantId ?? 0;
   const token = session.accessToken;
   const [chatbots, setChatbots] = useState<ChatbotSummary[]>([]);
+  const [modelProviders, setModelProviders] = useState<ModelProviderSummary[]>([]);
+  const [modelDefinitions, setModelDefinitions] = useState<ModelDefinitionSummary[]>([]);
+  const [modelCatalogLoading, setModelCatalogLoading] = useState(false);
   const [selectedChatbotId, setSelectedChatbotId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -482,10 +528,50 @@ function ChatbotsPage({ session }: { session: AuthSession }) {
     fallbackMessage: '',
     allowDirectModel: false,
     allowFeedback: true,
-    allowHandoff: true
+    allowHandoff: true,
+    providerCode: '',
+    modelCode: '',
+    embeddingProviderCode: '',
+    embeddingModelCode: ''
   });
 
   const selectedChatbot = chatbots.find((chatbot) => chatbot.id === selectedChatbotId) ?? null;
+  const selectableChatModels = modelDefinitions.filter((model) => model.status === 'ACTIVE' && model.purpose === 'CHAT_COMPLETION');
+  const selectableEmbeddingModelsCatalog = modelDefinitions.filter(
+    (model) => model.status === 'ACTIVE' && model.purpose === 'EMBEDDING'
+  );
+  const selectableProviders = modelProviders.filter(
+    (provider) =>
+      provider.status === 'ACTIVE'
+      && selectableChatModels.some((model) => model.providerCode === provider.providerCode)
+  );
+  const selectableEmbeddingProviders = modelProviders.filter(
+    (provider) =>
+      provider.status === 'ACTIVE'
+      && selectableEmbeddingModelsCatalog.some((model) => model.providerCode === provider.providerCode)
+  );
+  const selectableModels = behaviorForm.providerCode
+    ? selectableChatModels.filter((model) => model.providerCode === behaviorForm.providerCode)
+    : selectableChatModels;
+  const selectableEmbeddingModels = behaviorForm.embeddingProviderCode
+    ? selectableEmbeddingModelsCatalog.filter((model) => model.providerCode === behaviorForm.embeddingProviderCode)
+    : selectableEmbeddingModelsCatalog;
+
+  const loadModelCatalog = async () => {
+    setModelCatalogLoading(true);
+    try {
+      const [nextProviders, nextModels] = await Promise.all([
+        listModelProviders(token),
+        listModelDefinitions(token)
+      ]);
+      setModelProviders(nextProviders);
+      setModelDefinitions(nextModels);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : '模型目录加载失败。');
+    } finally {
+      setModelCatalogLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!tenantId) {
@@ -503,6 +589,10 @@ function ChatbotsPage({ session }: { session: AuthSession }) {
       .catch((error) => setErrorMessage(error instanceof Error ? error.message : 'Chatbot 列表加载失败。'))
       .finally(() => setLoading(false));
   }, [tenantId, token]);
+
+  useEffect(() => {
+    void loadModelCatalog();
+  }, [token]);
 
   useEffect(() => {
     if (!selectedChatbot) {
@@ -530,7 +620,11 @@ function ChatbotsPage({ session }: { session: AuthSession }) {
           fallbackMessage: detail.fallbackMessage,
           allowDirectModel: detail.allowDirectModel,
           allowFeedback: detail.allowFeedback,
-          allowHandoff: detail.allowHandoff
+          allowHandoff: detail.allowHandoff,
+          providerCode: detail.providerCode ?? '',
+          modelCode: detail.modelCode ?? '',
+          embeddingProviderCode: detail.embeddingProviderCode ?? '',
+          embeddingModelCode: detail.embeddingModelCode ?? ''
         });
       })
       .catch(() => setChatbotDetail(null));
@@ -791,6 +885,8 @@ function ChatbotsPage({ session }: { session: AuthSession }) {
                         公开码：{chatbot.publicCode}
                         <br />
                         主题色：{chatbot.themeColor}
+                        <br />
+                        直连模型：{describeDirectModel(chatbot)}
                       </div>
                     </button>
                   );
@@ -849,6 +945,14 @@ function ChatbotsPage({ session }: { session: AuthSession }) {
                   <div>品牌标识：{chatbotDetail?.brandVisible ? '显示' : '隐藏'}</div>
                   <div>启动按钮位置：{chatbotDetail?.launcherPosition ?? 'right'}</div>
                   <div>页面风格：{CHAT_STYLE_OPTIONS.find((option) => option.value === chatbotDetail?.stylePreset)?.label ?? 'Executive Horizon'}</div>
+                  <div>
+                    直连模型：
+                    {chatbotDetail ? describeDirectModel(chatbotDetail) : describeDirectModel(selectedChatbot)}
+                  </div>
+                  <div>
+                    知识 Embedding：
+                    {chatbotDetail ? describeEmbeddingModel(chatbotDetail) : describeEmbeddingModel(selectedChatbot)}
+                  </div>
                 </div>
                 <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                   <button type="button" disabled={submitting} onClick={() => void handleStatusChange('ACTIVE')} style={{ borderRadius: 999, border: 0, background: '#166534', color: '#fff', padding: '10px 16px', cursor: 'pointer' }}>
@@ -941,7 +1045,7 @@ function ChatbotsPage({ session }: { session: AuthSession }) {
           ) : null}
 
           {selectedChatbot ? (
-            <FormCard title="行为策略" description="调整兜底回复、模型直连、反馈和转人工开关。" submitLabel="保存策略" submitting={submitting} onSubmit={handleBehaviorSave} onCancel={() => setBehaviorForm({ fallbackMessage: chatbotDetail?.fallbackMessage ?? selectedChatbot.fallbackMessage, allowDirectModel: chatbotDetail?.allowDirectModel ?? false, allowFeedback: chatbotDetail?.allowFeedback ?? true, allowHandoff: chatbotDetail?.allowHandoff ?? true })}>
+            <FormCard title="行为策略" description="调整兜底回复、模型直连、知识 Embedding、反馈和转人工开关。" submitLabel="保存策略" submitting={submitting} onSubmit={handleBehaviorSave} onCancel={() => setBehaviorForm({ fallbackMessage: chatbotDetail?.fallbackMessage ?? selectedChatbot.fallbackMessage, allowDirectModel: chatbotDetail?.allowDirectModel ?? false, allowFeedback: chatbotDetail?.allowFeedback ?? true, allowHandoff: chatbotDetail?.allowHandoff ?? true, providerCode: chatbotDetail?.providerCode ?? '', modelCode: chatbotDetail?.modelCode ?? '', embeddingProviderCode: chatbotDetail?.embeddingProviderCode ?? '', embeddingModelCode: chatbotDetail?.embeddingModelCode ?? '' })}>
               <Field label="兜底话术">
                 <textarea value={behaviorForm.fallbackMessage} onChange={(event) => setBehaviorForm((current) => ({ ...current, fallbackMessage: event.target.value }))} style={inputStyle(true)} />
               </Field>
@@ -950,6 +1054,125 @@ function ChatbotsPage({ session }: { session: AuthSession }) {
                   <option value="false">关闭</option>
                   <option value="true">开启</option>
                 </select>
+              </Field>
+              <Field label="Model Provider">
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <select
+                      value={behaviorForm.providerCode ?? ''}
+                      onChange={(event) =>
+                        setBehaviorForm((current) => ({
+                          ...current,
+                          providerCode: event.target.value,
+                          modelCode:
+                            current.modelCode
+                            && !selectableChatModels.some(
+                              (model) => model.providerCode === event.target.value && model.modelCode === current.modelCode
+                            )
+                              ? ''
+                              : current.modelCode
+                        }))
+                      }
+                      style={{ ...inputStyle(), flex: 1 }}
+                    >
+                      <option value="">跟随系统默认</option>
+                      {selectableProviders.map((provider) => (
+                        <option key={provider.id} value={provider.providerCode}>{provider.displayName}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => void loadModelCatalog()}
+                      disabled={modelCatalogLoading || submitting}
+                      style={{
+                        borderRadius: 999,
+                        border: '1px solid #cbd5e1',
+                        background: '#fff',
+                        padding: '8px 14px',
+                        cursor: modelCatalogLoading || submitting ? 'not-allowed' : 'pointer',
+                        opacity: modelCatalogLoading || submitting ? 0.6 : 1
+                      }}
+                    >
+                      {modelCatalogLoading ? '刷新中...' : '刷新'}
+                    </button>
+                  </div>
+                  <div style={{ color: '#64748b', fontSize: 13 }}>
+                    仅显示已启用且已由超级管理员配置好的聊天模型提供商。
+                  </div>
+                </div>
+              </Field>
+              <Field label="Model">
+                <select
+                  value={behaviorForm.modelCode ?? ''}
+                  onChange={(event) => setBehaviorForm((current) => ({ ...current, modelCode: event.target.value }))}
+                  style={inputStyle()}
+                  disabled={!!behaviorForm.providerCode && selectableModels.length === 0}
+                >
+                  <option value="">{behaviorForm.providerCode ? '跟随 Provider 默认模型' : '跟随系统默认模型'}</option>
+                  {selectableModels.map((model) => (
+                    <option key={`${model.providerCode}-${model.modelCode}-${model.id}`} value={model.modelCode}>
+                      {model.displayName}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ color: '#64748b', fontSize: 13, marginTop: 8 }}>
+                  {behaviorForm.providerCode
+                    ? selectableModels.length > 0
+                      ? `当前 Provider 下可选 ${selectableModels.length} 个聊天模型。`
+                      : '当前 Provider 还没有可用聊天模型。'
+                    : '不指定时，运行时会回退到系统默认聊天模型。'}
+                </div>
+              </Field>
+              <Field label="Embedding Provider">
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <select
+                    value={behaviorForm.embeddingProviderCode ?? ''}
+                    onChange={(event) =>
+                      setBehaviorForm((current) => ({
+                        ...current,
+                        embeddingProviderCode: event.target.value,
+                        embeddingModelCode:
+                          current.embeddingModelCode
+                          && !selectableEmbeddingModelsCatalog.some(
+                            (model) => model.providerCode === event.target.value && model.modelCode === current.embeddingModelCode
+                          )
+                            ? ''
+                            : current.embeddingModelCode
+                      }))
+                    }
+                    style={inputStyle()}
+                  >
+                    <option value="">跟随系统默认</option>
+                    {selectableEmbeddingProviders.map((provider) => (
+                      <option key={provider.id} value={provider.providerCode}>{provider.displayName}</option>
+                    ))}
+                  </select>
+                  <div style={{ color: '#64748b', fontSize: 13 }}>
+                    仅显示已启用且存在可用 Embedding 模型的 Provider。
+                  </div>
+                </div>
+              </Field>
+              <Field label="Embedding Model">
+                <select
+                  value={behaviorForm.embeddingModelCode ?? ''}
+                  onChange={(event) => setBehaviorForm((current) => ({ ...current, embeddingModelCode: event.target.value }))}
+                  style={inputStyle()}
+                  disabled={!!behaviorForm.embeddingProviderCode && selectableEmbeddingModels.length === 0}
+                >
+                  <option value="">{behaviorForm.embeddingProviderCode ? '跟随 Provider 默认 Embedding' : '跟随系统默认 Embedding'}</option>
+                  {selectableEmbeddingModels.map((model) => (
+                    <option key={`${model.providerCode}-${model.modelCode}-${model.id}`} value={model.modelCode}>
+                      {model.displayName}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ color: '#64748b', fontSize: 13, marginTop: 8 }}>
+                  {behaviorForm.embeddingProviderCode
+                    ? selectableEmbeddingModels.length > 0
+                      ? `当前 Provider 下可选 ${selectableEmbeddingModels.length} 个 Embedding 模型。`
+                      : '当前 Provider 还没有可用 Embedding 模型。'
+                    : '不指定时，知识刷新与检索会回退到系统默认 Embedding 模型。'}
+                </div>
               </Field>
               <Field label="允许反馈">
                 <select value={behaviorForm.allowFeedback ? 'true' : 'false'} onChange={(event) => setBehaviorForm((current) => ({ ...current, allowFeedback: event.target.value === 'true' }))} style={inputStyle()}>
@@ -1904,6 +2127,7 @@ function ConversationsPage({ session }: { session: AuthSession }) {
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const conversationModelSummary = conversationDetail ? describeConversationModelSummary(conversationDetail) : null;
 
   useEffect(() => {
     if (!session.tenantId) {
@@ -1980,14 +2204,14 @@ function ConversationsPage({ session }: { session: AuthSession }) {
     setNotice(null);
 
     try {
-      const exportBlob = await exportConversation(token, selectedConversationId);
-      const objectUrl = window.URL.createObjectURL(exportBlob);
+      const exportResult = await exportConversation(token, selectedConversationId);
+      const objectUrl = window.URL.createObjectURL(exportResult.blob);
       const anchor = document.createElement('a');
       anchor.href = objectUrl;
-      anchor.download = `conversation-${selectedConversationId}.json`;
+      anchor.download = exportResult.fileName ?? `conversation-${selectedConversationId}.json`;
       anchor.click();
       window.URL.revokeObjectURL(objectUrl);
-      setNotice(`会话 ${selectedConversationId} 已导出。`);
+      setNotice(`会话 ${selectedConversationId} 已导出为 ${anchor.download}。`);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '会话导出失败。');
     } finally {
@@ -2095,7 +2319,11 @@ function ConversationsPage({ session }: { session: AuthSession }) {
                         {badge.label}
                       </span>
                     </div>
-                    <div style={{ color: '#475569', fontSize: 14 }}>访客：{conversation.anonymousVisitorId}</div>
+                    <div style={{ color: '#475569', fontSize: 14 }}>
+                      访客：{conversation.anonymousVisitorId}
+                      <br />
+                      入口：{conversation.entryType} / 消息数：{conversation.messageCount}
+                    </div>
                     <div style={{ color: '#334155', fontSize: 14 }}>{conversation.latestMessage || '暂无消息内容'}</div>
                   </button>
                 );
@@ -2121,9 +2349,30 @@ function ConversationsPage({ session }: { session: AuthSession }) {
                 <div>访客标识：{conversationDetail.anonymousVisitorId}</div>
                 <div>入口：{conversationDetail.entryType}</div>
                 <div>状态：{conversationDetail.status}</div>
-                <div>域名：{String(conversationDetail.metadata.domain ?? '-')}</div>
-                <div>IP：{String(conversationDetail.metadata.ipAddress ?? '-')}</div>
+                <div>消息数：{conversationDetail.messages.length}</div>
+                <div>域名：{conversationDetail.metadata.domain ?? '-'}</div>
+                <div>IP：{conversationDetail.metadata.ipAddress ?? '-'}</div>
+                <div>User Agent：{conversationDetail.metadata.userAgent ?? '-'}</div>
               </div>
+              {conversationModelSummary && (
+                <div
+                  style={{
+                    display: 'grid',
+                    gap: 8,
+                    padding: 14,
+                    borderRadius: 16,
+                    background: '#fff7ed',
+                    border: '1px solid #fed7aa',
+                    color: '#7c2d12'
+                  }}
+                >
+                  <strong>模型概览</strong>
+                  <div>最近一次命中：{conversationModelSummary.latest}</div>
+                  <div>成功调用：{conversationModelSummary.successfulCalls} / {conversationDetail.modelCalls.length}</div>
+                  <div>累计 Token：{conversationModelSummary.totalTokens}</div>
+                  <div>累计估算成本：{conversationModelSummary.totalCost.toFixed(4)}</div>
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                 <button type="button" disabled={submitting} onClick={() => void handleStatusChange('ACTIVE')} style={{ borderRadius: 999, border: 0, background: '#166534', color: '#fff', padding: '10px 16px', cursor: 'pointer' }}>
                   标记 ACTIVE
@@ -2149,9 +2398,45 @@ function ConversationsPage({ session }: { session: AuthSession }) {
                       <span style={{ color: '#64748b', fontSize: 12 }}>{message.createdAt}</span>
                     </div>
                     <div style={{ color: '#334155', whiteSpace: 'pre-wrap' }}>{message.content}</div>
+                    {(message.sourceType || message.citations.length > 0 || message.model) && (
+                      <div style={{ marginTop: 10, display: 'grid', gap: 6, padding: 10, borderRadius: 12, background: '#ffffff', border: '1px dashed #cbd5e1', color: '#475569', fontSize: 13 }}>
+                        <div>来源类型：{message.sourceType ?? '-'}</div>
+                        <div>语言：{message.language ?? '-'}</div>
+                        {message.knowledgeScore !== null && <div>知识命中分数：{message.knowledgeScore}</div>}
+                        {message.citations.length > 0 && (
+                          <div>
+                            引用来源：{message.citations.map((citation) => citation.title ?? citation.sourceType ?? '未命名来源').join(' / ')}
+                          </div>
+                        )}
+                        {message.model && (
+                          <>
+                            <div>模型：{message.model.provider ?? '-'} / {message.model.model ?? '-'}</div>
+                            <div>模式：{message.model.mode ?? '-'}</div>
+                            <div>Token：{message.model.totalTokens ?? 0}（Prompt {message.model.promptTokens ?? 0} / Completion {message.model.completionTokens ?? 0}）</div>
+                            <div>估算成本：{message.model.estimatedCost?.toFixed(4) ?? '0.0000'}</div>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
+              {conversationDetail.modelCalls.length > 0 && (
+                <div style={{ display: 'grid', gap: 12 }}>
+                  <h3 style={{ margin: '8px 0 0', color: '#0f172a' }}>模型调用日志</h3>
+                  {conversationDetail.modelCalls.map((call) => (
+                    <div key={call.id} style={{ borderRadius: 14, border: '1px solid #cbd5e1', background: '#f8fafc', padding: 12, color: '#334155' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
+                        <strong>{call.provider} / {call.model}</strong>
+                        <span style={{ color: '#64748b', fontSize: 12 }}>{call.createdAt}</span>
+                      </div>
+                      <div>用途：{call.purpose}，状态：{call.status}，耗时：{call.latencyMs}ms</div>
+                      <div>Token：{call.totalTokens}（Prompt {call.promptTokens} / Completion {call.completionTokens}）</div>
+                      <div>估算成本：{call.estimatedCost.toFixed(4)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           )}
         </section>

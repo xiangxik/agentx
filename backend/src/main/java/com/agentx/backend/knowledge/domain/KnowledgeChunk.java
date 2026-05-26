@@ -40,6 +40,12 @@ public class KnowledgeChunk {
   @Column(name = "embedding_ref")
   private String embeddingRef;
 
+  @Column(name = "embedding_json", columnDefinition = "TEXT")
+  private String embeddingJson;
+
+  @Column(name = "embedding_dimension")
+  private Integer embeddingDimension;
+
   @Column(name = "created_at", nullable = false)
   private Instant createdAt = Instant.now();
 
@@ -109,6 +115,22 @@ public class KnowledgeChunk {
 
   public void setEmbeddingRef(String embeddingRef) {
     this.embeddingRef = embeddingRef;
+  }
+
+  public String getEmbeddingJson() {
+    return embeddingJson;
+  }
+
+  public void setEmbeddingJson(String embeddingJson) {
+    this.embeddingJson = embeddingJson;
+  }
+
+  public Integer getEmbeddingDimension() {
+    return embeddingDimension;
+  }
+
+  public void setEmbeddingDimension(Integer embeddingDimension) {
+    this.embeddingDimension = embeddingDimension;
   }
 
   public Instant getCreatedAt() {

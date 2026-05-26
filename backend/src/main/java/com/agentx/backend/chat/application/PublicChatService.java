@@ -11,6 +11,7 @@ import com.agentx.backend.conversation.domain.MessageRole;
 import com.agentx.backend.conversation.domain.MessageStatus;
 import com.agentx.backend.faq.application.FaqService;
 import com.agentx.backend.knowledge.application.KnowledgeRetrievalService;
+import com.agentx.backend.model.application.ModelAnswerService;
 import com.agentx.backend.plan.application.PlanService;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +29,7 @@ public class PublicChatService {
   private final MessageRepository messageRepository;
   private final FaqService faqService;
     private final KnowledgeRetrievalService knowledgeRetrievalService;
+    private final ModelAnswerService modelAnswerService;
   private final ObjectMapper objectMapper;
     private final PlanService planService;
 
@@ -36,7 +38,8 @@ public class PublicChatService {
       ConversationRepository conversationRepository,
       MessageRepository messageRepository,
       FaqService faqService,
-    KnowledgeRetrievalService knowledgeRetrievalService,
+            KnowledgeRetrievalService knowledgeRetrievalService,
+            ModelAnswerService modelAnswerService,
             ObjectMapper objectMapper,
             PlanService planService) {
     this.chatbotService = chatbotService;
@@ -44,6 +47,7 @@ public class PublicChatService {
     this.messageRepository = messageRepository;
     this.faqService = faqService;
     this.knowledgeRetrievalService = knowledgeRetrievalService;
+        this.modelAnswerService = modelAnswerService;
     this.objectMapper = objectMapper;
         this.planService = planService;
   }
@@ -65,7 +69,9 @@ public class PublicChatService {
             Map.of(
                 "ip", request.ipAddress(),
                 "userAgent", request.userAgent(),
-                "domain", request.domain())));
+                "domain", request.domain(),
+                "chatbotPublicCode", snapshot.publicCode(),
+                "chatbotName", snapshot.name())));
     Conversation saved = conversationRepository.save(conversation);
     return new InitConversationResponse(
         saved.getId(),
@@ -113,21 +119,16 @@ public class PublicChatService {
     KnowledgeRetrievalService.RetrievalResult knowledgeMatch =
         faqMatch.matched()
             ? new KnowledgeRetrievalService.RetrievalResult(false, null, null, null, null, 0)
-            : knowledgeRetrievalService.search(snapshot.tenantId(), snapshot.chatbotId(), request.message());
-    String answer =
-        faqMatch.matched()
-            ? faqMatch.answer()
-            : knowledgeMatch.matched()
-                ? "根据知识库内容：" + knowledgeMatch.content()
-                : snapshot.fallbackMessage();
-    String sourceType = faqMatch.matched() ? "FAQ" : knowledgeMatch.matched() ? "KNOWLEDGE" : "FALLBACK";
+            : knowledgeRetrievalService.search(
+                snapshot.tenantId(), snapshot.chatbotId(), request.conversationId(), request.message());
+    ResolvedReply resolvedReply = resolveReply(snapshot, request, faqMatch, knowledgeMatch);
 
     Message assistantMessage = new Message();
     assistantMessage.setTenantId(snapshot.tenantId());
     assistantMessage.setConversationId(conversation.getId());
     assistantMessage.setRole(MessageRole.ASSISTANT);
     assistantMessage.setStatus(MessageStatus.DELIVERED);
-    assistantMessage.setContent(answer);
+    assistantMessage.setContent(resolvedReply.answer());
     assistantMessage.setMetadataJson(
         toJson(
             Map.of(
@@ -135,25 +136,110 @@ public class PublicChatService {
                 "faqId", faqMatch.faqId() == null ? "" : String.valueOf(faqMatch.faqId()),
                 "knowledgeSourceId",
                 knowledgeMatch.sourceId() == null ? "" : String.valueOf(knowledgeMatch.sourceId()),
-                "sourceType", sourceType)));
+                "knowledgeScore", knowledgeMatch.score(),
+                "language", request.language(),
+                "sourceType", resolvedReply.sourceType(),
+                "citations", resolvedReply.citationMetadata(),
+                "model", resolvedReply.modelMetadata())));
     Message savedAssistantMessage = messageRepository.save(assistantMessage);
 
     return new SendMessageResponse(
         conversation.getId(),
         savedAssistantMessage.getId(),
         String.valueOf(savedVisitorMessage.getId()),
-        answer,
-        sourceType,
-        faqMatch.matched()
-            ? List.of(new Citation(faqMatch.faqId(), faqMatch.question(), "FAQ", null))
-            : knowledgeMatch.matched()
-                ? List.of(
-                    new Citation(
-                        knowledgeMatch.sourceId(),
-                        knowledgeMatch.sourceName(),
-                        "KNOWLEDGE",
-                        knowledgeMatch.sourceLink()))
-                : List.of());
+        resolvedReply.answer(),
+        resolvedReply.sourceType(),
+        resolvedReply.citations());
+  }
+
+  private ResolvedReply resolveReply(
+      PublicChatbotSnapshot snapshot,
+      SendMessageRequest request,
+      FaqService.MatchResult faqMatch,
+      KnowledgeRetrievalService.RetrievalResult knowledgeMatch) {
+    if (faqMatch.matched()) {
+      Citation citation = new Citation(faqMatch.faqId(), faqMatch.question(), "FAQ", null);
+      return new ResolvedReply(
+          faqMatch.answer(), "FAQ", List.of(citation), toCitationMetadata(List.of(citation)), Map.of());
+    }
+
+    if (knowledgeMatch.matched()) {
+      ModelAnswerService.ModelAnswer modelAnswer =
+          modelAnswerService.generate(
+              new ModelAnswerService.ModelAnswerRequest(
+                  snapshot.tenantId(),
+                  snapshot.chatbotId(),
+                  request.conversationId(),
+                  snapshot.name(),
+                  request.language(),
+                  request.message(),
+                  knowledgeMatch.content(),
+                  snapshot.providerCode(),
+                  snapshot.modelCode()));
+      Citation citation =
+          new Citation(
+              knowledgeMatch.sourceId(),
+              knowledgeMatch.sourceName(),
+              "KNOWLEDGE",
+              knowledgeMatch.sourceLink());
+      return new ResolvedReply(
+          modelAnswer.answer(),
+          "KNOWLEDGE",
+          List.of(citation),
+          toCitationMetadata(List.of(citation)),
+          Map.of(
+              "provider", modelAnswer.provider(),
+              "model", modelAnswer.model(),
+              "mode", "KNOWLEDGE_AUGMENTED",
+              "promptTokens", modelAnswer.promptTokens(),
+              "completionTokens", modelAnswer.completionTokens(),
+              "totalTokens", modelAnswer.totalTokens(),
+              "estimatedCost", modelAnswer.estimatedCost(),
+              "logId", modelAnswer.logId()));
+    }
+
+    if (snapshot.allowDirectModel()) {
+      ModelAnswerService.ModelAnswer modelAnswer =
+          modelAnswerService.generate(
+              new ModelAnswerService.ModelAnswerRequest(
+                  snapshot.tenantId(),
+                  snapshot.chatbotId(),
+                  request.conversationId(),
+                  snapshot.name(),
+                  request.language(),
+                  request.message(),
+                  null,
+                  snapshot.providerCode(),
+                  snapshot.modelCode()));
+      return new ResolvedReply(
+          modelAnswer.answer(),
+          "MODEL",
+          List.of(),
+          List.of(),
+          Map.of(
+              "provider", modelAnswer.provider(),
+              "model", modelAnswer.model(),
+              "mode", "DIRECT",
+              "promptTokens", modelAnswer.promptTokens(),
+              "completionTokens", modelAnswer.completionTokens(),
+              "totalTokens", modelAnswer.totalTokens(),
+              "estimatedCost", modelAnswer.estimatedCost(),
+              "logId", modelAnswer.logId()));
+    }
+
+    return new ResolvedReply(snapshot.fallbackMessage(), "FALLBACK", List.of(), List.of(), Map.of());
+  }
+
+  private List<Map<String, Object>> toCitationMetadata(List<Citation> citations) {
+    return citations.stream()
+        .map(
+            citation ->
+                Map.<String, Object>of(
+                    "sourceId", citation.sourceId() == null ? "" : citation.sourceId(),
+                    "title", citation.title() == null ? "" : citation.title(),
+                    "sourceType", citation.sourceType(),
+                    "sourceLink", citation.sourceLink() == null ? "" : citation.sourceLink()))
+        .toList();
   }
 
   @Transactional(readOnly = true)
@@ -211,4 +297,11 @@ public class PublicChatService {
       Long conversationId, String anonymousVisitorId, List<TranscriptMessage> messages) {}
 
   public record TranscriptMessage(Long id, String role, String content) {}
+
+    private record ResolvedReply(
+            String answer,
+            String sourceType,
+            List<Citation> citations,
+            List<Map<String, Object>> citationMetadata,
+            Map<String, Object> modelMetadata) {}
 }
