@@ -10,8 +10,6 @@ import com.agentx.backend.knowledge.domain.KnowledgeSourceRepository;
 import com.agentx.backend.knowledge.domain.KnowledgeSourceStatus;
 import com.agentx.backend.knowledge.domain.KnowledgeSourceType;
 import com.agentx.backend.plan.application.PlanService;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -33,6 +31,8 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class KnowledgeSourceService {
@@ -372,7 +372,7 @@ public class KnowledgeSourceService {
   private Map<String, Object> readMetadata(KnowledgeSource source) {
     try {
       return new LinkedHashMap<>(objectMapper.readValue(source.getMetadataJson(), Map.class));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("Failed to deserialize knowledge source metadata", exception);
     }
   }
@@ -546,7 +546,7 @@ public class KnowledgeSourceService {
               ? 0L
               : ((Number) metadata.get("fileSizeBytes")).longValue(),
           source.getCreatedAt().toString());
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("Failed to deserialize knowledge source metadata", exception);
     }
   }
@@ -580,7 +580,7 @@ public class KnowledgeSourceService {
           normalizedMetadata,
           chunks,
           source.getCreatedAt().toString());
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("Failed to deserialize knowledge source metadata", exception);
     }
   }
@@ -588,7 +588,7 @@ public class KnowledgeSourceService {
   private String toJson(Map<String, Object> data) {
     try {
       return objectMapper.writeValueAsString(data);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("Failed to serialize knowledge source metadata", exception);
     }
   }

@@ -8,14 +8,14 @@ import com.agentx.backend.conversation.domain.ConversationRepository;
 import com.agentx.backend.conversation.domain.ConversationStatus;
 import com.agentx.backend.conversation.domain.Message;
 import com.agentx.backend.conversation.domain.MessageRepository;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class ConversationAdminService {
@@ -108,7 +108,7 @@ public class ConversationAdminService {
 
       return new ConversationExport(
           "conversation-%d.json".formatted(detail.id()), content);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("Failed to serialize conversation export", exception);
     }
   }
@@ -164,7 +164,7 @@ public class ConversationAdminService {
   private Map<String, Object> fromJson(String value) {
     try {
       return objectMapper.readValue(value, new TypeReference<>() {});
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("Failed to parse conversation payload", exception);
     }
   }

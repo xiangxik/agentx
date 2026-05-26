@@ -10,14 +10,14 @@ import com.agentx.backend.chatbot.domain.ChatbotRepository;
 import com.agentx.backend.chatbot.domain.ChatbotStatus;
 import com.agentx.backend.common.security.CurrentUser;
 import com.agentx.backend.plan.application.PlanService;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class ChatbotService {
@@ -321,7 +321,7 @@ public class ChatbotService {
   private String toJson(Map<String, Object> value) {
     try {
       return objectMapper.writeValueAsString(value);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("Failed to serialize chatbot config", exception);
     }
   }
@@ -329,7 +329,7 @@ public class ChatbotService {
   private Map<String, Object> fromJson(String value) {
     try {
       return objectMapper.readValue(value, new TypeReference<>() {});
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("Failed to deserialize chatbot config", exception);
     }
   }

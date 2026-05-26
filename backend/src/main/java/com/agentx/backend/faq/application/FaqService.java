@@ -6,14 +6,14 @@ import com.agentx.backend.common.security.CurrentUser;
 import com.agentx.backend.faq.domain.Faq;
 import com.agentx.backend.faq.domain.FaqRepository;
 import com.agentx.backend.faq.domain.FaqStatus;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class FaqService {
@@ -146,7 +146,7 @@ public class FaqService {
           Map.of("count", faqs.size()));
 
       return new FaqExport("faq-%d-%d.json".formatted(tenantId, chatbotId), content);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("Failed to serialize FAQ export", exception);
     }
   }

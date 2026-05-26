@@ -3,8 +3,6 @@ package com.agentx.backend.chat.api;
 import com.agentx.backend.chat.application.PublicChatService;
 import com.agentx.backend.chatbot.application.ChatbotService;
 import com.agentx.backend.chatbot.application.ChatbotService.PublicChatbotSnapshot;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLDecoder;
@@ -20,6 +18,8 @@ import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 @Component
 public class PublicChatWebSocketHandler extends TextWebSocketHandler {
@@ -131,7 +131,7 @@ public class PublicChatWebSocketHandler extends TextWebSocketHandler {
     return new HandshakeContext(conversationId, snapshot);
   }
 
-  private ChatClientMessage readClientMessage(String payload) throws JsonProcessingException {
+  private ChatClientMessage readClientMessage(String payload) throws JacksonException {
     return objectMapper.readValue(payload, ChatClientMessage.class);
   }
 

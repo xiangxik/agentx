@@ -12,13 +12,13 @@ import com.agentx.backend.conversation.domain.MessageStatus;
 import com.agentx.backend.faq.application.FaqService;
 import com.agentx.backend.knowledge.application.KnowledgeRetrievalService;
 import com.agentx.backend.plan.application.PlanService;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class PublicChatService {
@@ -174,7 +174,7 @@ public class PublicChatService {
   private String toJson(Map<String, Object> data) {
     try {
       return objectMapper.writeValueAsString(data);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("Failed to serialize chat payload", exception);
     }
   }

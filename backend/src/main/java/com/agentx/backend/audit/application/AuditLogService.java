@@ -2,9 +2,6 @@ package com.agentx.backend.audit.application;
 
 import com.agentx.backend.audit.domain.AuditLog;
 import com.agentx.backend.audit.domain.AuditLogRepository;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.criteria.Predicate;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -12,6 +9,9 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class AuditLogService {
@@ -117,7 +117,7 @@ public class AuditLogService {
   private String toJson(Map<String, Object> context) {
     try {
       return objectMapper.writeValueAsString(context);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       return "{}";
     }
   }
@@ -125,7 +125,7 @@ public class AuditLogService {
   private Map<String, Object> fromJson(String contextJson) {
     try {
       return objectMapper.readValue(contextJson == null ? "{}" : contextJson, new TypeReference<>() {});
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       return Map.of();
     }
   }

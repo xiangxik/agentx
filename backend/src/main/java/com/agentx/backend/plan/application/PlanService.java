@@ -15,12 +15,12 @@ import com.agentx.backend.plan.domain.PlanRepository;
 import com.agentx.backend.plan.domain.PlanStatus;
 import com.agentx.backend.plan.domain.TenantQuota;
 import com.agentx.backend.plan.domain.TenantQuotaRepository;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class PlanService {
@@ -261,7 +261,7 @@ public class PlanService {
   private String toJson(Map<String, Long> data) {
     try {
       return objectMapper.writeValueAsString(data);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("Failed to serialize plan data", exception);
     }
   }
@@ -274,7 +274,7 @@ public class PlanService {
           .collect(
               java.util.stream.Collectors.toMap(
                   Map.Entry::getKey, entry -> ((Number) entry.getValue()).longValue()));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("Failed to deserialize plan data", exception);
     }
   }
