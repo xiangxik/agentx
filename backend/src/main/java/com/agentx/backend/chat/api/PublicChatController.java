@@ -64,6 +64,16 @@ public class PublicChatController {
     throw exception;
   }
 
+  @ExceptionHandler(IllegalArgumentException.class)
+  @ResponseStatus(HttpStatus.BAD_REQUEST)
+  public Map<String, String> handleIllegalArgument(IllegalArgumentException exception) {
+    if ("CHATBOT_NOT_FOUND".equals(exception.getMessage())) {
+      return Map.of("code", exception.getMessage());
+    }
+
+    throw exception;
+  }
+
   public record InitConversationRequest(
       @NotBlank String chatbotPublicCode,
       @NotBlank String entryType,

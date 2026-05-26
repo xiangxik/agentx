@@ -43,6 +43,26 @@ class PublicChatFlowTests {
   }
 
   @Test
+  void publicChatInitReturnsBadRequestWhenChatbotDoesNotExist() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/public/chat/init")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "chatbotPublicCode":"missing-bot",
+                      "entryType":"CHAT_PAGE",
+                      "domain":"localhost",
+                      "ipAddress":"127.0.0.1",
+                      "userAgent":"JUnit"
+                    }
+                    """))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("CHATBOT_NOT_FOUND"));
+  }
+
+  @Test
   void publicChatReturnsFaqAnswerWhenMatched() throws Exception {
     String tenantResponse =
         mockMvc
@@ -132,6 +152,8 @@ class PublicChatFlowTests {
                             .formatted(publicCode)))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.welcomeMessage").isNotEmpty())
+            .andExpect(jsonPath("$.brandVisible").value(true))
+            .andExpect(jsonPath("$.stylePreset").value("executive"))
             .andReturn()
             .getResponse()
             .getContentAsString();

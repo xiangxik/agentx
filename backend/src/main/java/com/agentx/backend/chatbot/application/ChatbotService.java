@@ -62,7 +62,8 @@ public class ChatbotService {
     appearance.setChatbotId(saved.getId());
     appearance.setThemeColor("#2563eb");
     appearance.setWelcomeMessage("你好，我是你的专属客服机器人。请告诉我你的问题。");
-    appearance.setConfigJson(toJson(Map.of("brandVisible", true, "launcherPosition", "right")));
+    appearance.setConfigJson(
+      toJson(Map.of("brandVisible", true, "launcherPosition", "right", "stylePreset", "executive")));
     chatbotAppearanceRepository.save(appearance);
 
     ChatbotBehavior behavior = new ChatbotBehavior();
@@ -114,6 +115,7 @@ public class ChatbotService {
         behavior.getFallbackMessage(),
         Boolean.TRUE.equals(appearanceConfig.get("brandVisible")),
         String.valueOf(appearanceConfig.getOrDefault("launcherPosition", "right")),
+        String.valueOf(appearanceConfig.getOrDefault("stylePreset", "executive")),
         Boolean.TRUE.equals(behaviorConfig.get("allowDirectModel")),
         Boolean.TRUE.equals(behaviorConfig.get("allowFeedback")),
         Boolean.TRUE.equals(behaviorConfig.get("allowHandoff")));
@@ -215,7 +217,8 @@ public class ChatbotService {
         toJson(
             Map.of(
                 "brandVisible", request.brandVisible(),
-                "launcherPosition", request.launcherPosition())));
+          "launcherPosition", request.launcherPosition(),
+          "stylePreset", request.stylePreset())));
     auditLogService.record(
         chatbot.getTenantId(),
         actor.userId(),
@@ -253,7 +256,10 @@ public class ChatbotService {
 
   @Transactional(readOnly = true)
   public PublicChatbotSnapshot getPublicSnapshot(String publicCode) {
-    Chatbot chatbot = chatbotRepository.findByPublicCode(publicCode).orElseThrow();
+    Chatbot chatbot =
+      chatbotRepository
+        .findByPublicCode(publicCode)
+        .orElseThrow(() -> new IllegalArgumentException("CHATBOT_NOT_FOUND"));
     ChatbotAppearance appearance =
         chatbotAppearanceRepository.findByChatbotId(chatbot.getId()).orElseThrow();
     ChatbotBehavior behavior =
@@ -267,6 +273,8 @@ public class ChatbotService {
         chatbot.getPublicCode(),
         appearance.getThemeColor(),
         appearance.getWelcomeMessage(),
+      Boolean.TRUE.equals(fromJson(appearance.getConfigJson()).get("brandVisible")),
+      String.valueOf(fromJson(appearance.getConfigJson()).getOrDefault("stylePreset", "executive")),
         behavior.getFallbackMessage());
   }
 
@@ -333,7 +341,11 @@ public class ChatbotService {
       String name, String description, String language, ChatbotStatus status) {}
 
   public record UpdateAppearanceRequest(
-      String themeColor, String welcomeMessage, boolean brandVisible, String launcherPosition) {}
+      String themeColor,
+      String welcomeMessage,
+      boolean brandVisible,
+      String launcherPosition,
+      String stylePreset) {}
 
   public record UpdateBehaviorRequest(
       String fallbackMessage, boolean allowDirectModel, boolean allowFeedback, boolean allowHandoff) {}
@@ -363,6 +375,7 @@ public class ChatbotService {
       String fallbackMessage,
       boolean brandVisible,
       String launcherPosition,
+      String stylePreset,
       boolean allowDirectModel,
       boolean allowFeedback,
       boolean allowHandoff) {}
@@ -376,5 +389,7 @@ public class ChatbotService {
       String publicCode,
       String themeColor,
       String welcomeMessage,
+      boolean brandVisible,
+      String stylePreset,
       String fallbackMessage) {}
 }

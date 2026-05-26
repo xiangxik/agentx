@@ -68,6 +68,14 @@ const errorMessages: Record<string, string> = {
 type ChatbotFormState = CreateChatbotRequest;
 type FaqFormState = CreateFaqRequest;
 
+const CHAT_STYLE_OPTIONS = [
+  { value: 'executive', label: 'Executive Horizon', description: '标准商务蓝，适合通用企业客服。', color: '#2563eb' },
+  { value: 'slate', label: 'Slate Ledger', description: '冷静石板灰，适合金融与管理后台。', color: '#475569' },
+  { value: 'heritage', label: 'Heritage Reserve', description: '沉稳酒红与米色，适合高端服务品牌。', color: '#8b1e3f' },
+  { value: 'forest', label: 'Forest Council', description: '低饱和深绿，适合法务、医疗与咨询。', color: '#166534' },
+  { value: 'graphite', label: 'Graphite Boardroom', description: '黑灰现代风，适合科技与企业门户。', color: '#0f172a' }
+] as const;
+
 function readSession() {
   if (typeof window === 'undefined') {
     return null;
@@ -467,7 +475,8 @@ function ChatbotsPage({ session }: { session: AuthSession }) {
     themeColor: '#2563eb',
     welcomeMessage: '',
     brandVisible: true,
-    launcherPosition: 'right'
+    launcherPosition: 'right',
+    stylePreset: 'executive'
   });
   const [behaviorForm, setBehaviorForm] = useState<UpdateChatbotBehaviorRequest>({
     fallbackMessage: '',
@@ -514,7 +523,8 @@ function ChatbotsPage({ session }: { session: AuthSession }) {
           themeColor: detail.themeColor,
           welcomeMessage: detail.welcomeMessage,
           brandVisible: detail.brandVisible,
-          launcherPosition: detail.launcherPosition
+          launcherPosition: detail.launcherPosition,
+          stylePreset: detail.stylePreset
         });
         setBehaviorForm({
           fallbackMessage: detail.fallbackMessage,
@@ -838,6 +848,7 @@ function ChatbotsPage({ session }: { session: AuthSession }) {
                   <div>兜底话术：{chatbotDetail?.fallbackMessage ?? selectedChatbot.fallbackMessage}</div>
                   <div>品牌标识：{chatbotDetail?.brandVisible ? '显示' : '隐藏'}</div>
                   <div>启动按钮位置：{chatbotDetail?.launcherPosition ?? 'right'}</div>
+                  <div>页面风格：{CHAT_STYLE_OPTIONS.find((option) => option.value === chatbotDetail?.stylePreset)?.label ?? 'Executive Horizon'}</div>
                 </div>
                 <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                   <button type="button" disabled={submitting} onClick={() => void handleStatusChange('ACTIVE')} style={{ borderRadius: 999, border: 0, background: '#166534', color: '#fff', padding: '10px 16px', cursor: 'pointer' }}>
@@ -864,9 +875,52 @@ function ChatbotsPage({ session }: { session: AuthSession }) {
           </div>
 
           {selectedChatbot ? (
-            <FormCard title="外观配置" description="调整主题色、欢迎语和品牌展示。" submitLabel="保存外观" submitting={submitting} onSubmit={handleAppearanceSave} onCancel={() => setAppearanceForm({ themeColor: chatbotDetail?.themeColor ?? selectedChatbot.themeColor, welcomeMessage: chatbotDetail?.welcomeMessage ?? selectedChatbot.welcomeMessage, brandVisible: chatbotDetail?.brandVisible ?? true, launcherPosition: chatbotDetail?.launcherPosition ?? 'right' })}>
+            <FormCard title="外观配置" description="调整主题色、欢迎语、品牌展示和聊天页风格。" submitLabel="保存外观" submitting={submitting} onSubmit={handleAppearanceSave} onCancel={() => setAppearanceForm({ themeColor: chatbotDetail?.themeColor ?? selectedChatbot.themeColor, welcomeMessage: chatbotDetail?.welcomeMessage ?? selectedChatbot.welcomeMessage, brandVisible: chatbotDetail?.brandVisible ?? true, launcherPosition: chatbotDetail?.launcherPosition ?? 'right', stylePreset: chatbotDetail?.stylePreset ?? 'executive' })}>
               <Field label="主题色">
                 <input value={appearanceForm.themeColor} onChange={(event) => setAppearanceForm((current) => ({ ...current, themeColor: event.target.value }))} style={inputStyle()} />
+              </Field>
+              <Field label="页面风格">
+                <select value={appearanceForm.stylePreset} onChange={(event) => setAppearanceForm((current) => ({ ...current, stylePreset: event.target.value }))} style={inputStyle()}>
+                  {CHAT_STYLE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+                  {CHAT_STYLE_OPTIONS.map((option) => {
+                    const selected = appearanceForm.stylePreset === option.value;
+
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setAppearanceForm((current) => ({ ...current, stylePreset: option.value, themeColor: selected ? current.themeColor : option.color }))}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          width: '100%',
+                          borderRadius: 16,
+                          border: selected ? `1px solid ${option.color}` : '1px solid #e2e8f0',
+                          background: selected ? '#fff7ed' : '#fff',
+                          padding: '12px 14px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <span style={{ width: 14, height: 14, borderRadius: '50%', background: option.color, flexShrink: 0 }} />
+                          <span>
+                            <strong style={{ display: 'block', textAlign: 'left' }}>{option.label}</strong>
+                            <span style={{ display: 'block', textAlign: 'left', color: '#64748b', fontSize: 13 }}>{option.description}</span>
+                          </span>
+                        </span>
+                        <span style={{ color: selected ? '#c2410c' : '#94a3b8', fontSize: 12, fontWeight: 700 }}>{selected ? '已选中' : '可选'}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </Field>
               <Field label="欢迎语">
                 <textarea value={appearanceForm.welcomeMessage} onChange={(event) => setAppearanceForm((current) => ({ ...current, welcomeMessage: event.target.value }))} style={inputStyle(true)} />

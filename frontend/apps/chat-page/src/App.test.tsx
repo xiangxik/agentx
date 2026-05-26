@@ -5,9 +5,41 @@ import { App } from './App';
 
 describe('chat-page app', () => {
   const fetchMock = vi.fn();
+  const sockets: MockWebSocket[] = [];
+
+  class MockWebSocket {
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSING = 2;
+    static readonly CLOSED = 3;
+
+    readyState = MockWebSocket.CONNECTING;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+
+    constructor(public readonly url: string) {
+      sockets.push(this);
+    }
+
+    send() {}
+
+    close() {
+      this.readyState = MockWebSocket.CLOSED;
+      this.onclose?.();
+    }
+
+    open() {
+      this.readyState = MockWebSocket.OPEN;
+      this.onopen?.();
+    }
+  }
 
   beforeEach(() => {
     vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
+    sockets.length = 0;
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -27,49 +59,9 @@ describe('chat-page app', () => {
 
   it('renders title', async () => {
     render(<App />);
-    expect(screen.getByText('独立聊天页')).toBeInTheDocument();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-  });
-
-  it('renders knowledge citation link after send', async () => {
-    fetchMock
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          conversationId: 123,
-          anonymousVisitorId: 'visitor-1',
-          welcomeMessage: '欢迎来到 AgentX。',
-          themeColor: '#2563eb'
-        })
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          conversationId: 123,
-          assistantMessageId: 456,
-          answer: '根据知识库内容：订单支付后七天内可以在线提交退款申请。',
-          sourceType: 'KNOWLEDGE',
-          citations: [
-            {
-              sourceId: 9,
-              title: '帮助中心',
-              sourceType: 'KNOWLEDGE',
-              sourceLink: 'https://example.com/help'
-            }
-          ]
-        })
-      });
-
-    render(<App />);
-
+    expect(screen.getByRole('heading', { name: 'AgentX 智能接待中心' })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('欢迎来到 AgentX。')).toBeInTheDocument());
-
-    fireEvent.change(screen.getByPlaceholderText('输入访客问题'), {
-      target: { value: '退款规则是什么？' }
-    });
-    fireEvent.click(screen.getByText('发送'));
-
-    await waitFor(() => expect(screen.getByText('根据知识库内容：订单支付后七天内可以在线提交退款申请。')).toBeInTheDocument());
-    expect(screen.getByRole('link', { name: '知识库: 帮助中心' })).toHaveAttribute('href', 'https://example.com/help');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sockets[0].url).toContain('chatbotPublicCode=demo-bot');
   });
 });

@@ -1005,12 +1005,14 @@ class AdminControllersTests {
                 "themeColor":"#0f766e",
                 "welcomeMessage":"欢迎来到支持台。",
                 "brandVisible":false,
-                "launcherPosition":"left"
+                "launcherPosition":"left",
+                "stylePreset":"forest"
               }
               """))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.themeColor").value("#0f766e"))
-        .andExpect(jsonPath("$.brandVisible").value(false));
+        .andExpect(jsonPath("$.brandVisible").value(false))
+        .andExpect(jsonPath("$.stylePreset").value("forest"));
 
       mockMvc
         .perform(

@@ -83,7 +83,8 @@ public class ChatbotAdminController {
             request.themeColor(),
             request.welcomeMessage(),
             request.brandVisible(),
-            request.launcherPosition()));
+          request.launcherPosition(),
+          request.stylePreset()));
   }
 
   @PatchMapping("/{chatbotId}/behavior")
@@ -138,7 +139,8 @@ public class ChatbotAdminController {
         @NotBlank String themeColor,
         @NotBlank String welcomeMessage,
         boolean brandVisible,
-        @NotBlank String launcherPosition) {}
+      @NotBlank String launcherPosition,
+      @NotBlank String stylePreset) {}
 
     public record UpdateBehaviorRequest(
         @NotBlank String fallbackMessage,

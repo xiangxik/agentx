@@ -169,6 +169,7 @@ export interface UpdateChatbotRequest {
 export interface ChatbotDetail extends ChatbotSummary {
   brandVisible: boolean;
   launcherPosition: string;
+  stylePreset: string;
   allowDirectModel: boolean;
   allowFeedback: boolean;
   allowHandoff: boolean;
@@ -179,6 +180,7 @@ export interface UpdateChatbotAppearanceRequest {
   welcomeMessage: string;
   brandVisible: boolean;
   launcherPosition: string;
+  stylePreset: string;
 }
 
 export interface UpdateChatbotBehaviorRequest {

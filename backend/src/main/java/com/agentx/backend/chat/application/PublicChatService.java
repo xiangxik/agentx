@@ -71,13 +71,26 @@ public class PublicChatService {
         saved.getId(),
         saved.getAnonymousVisitorId(),
         snapshot.welcomeMessage(),
-        snapshot.themeColor());
+        snapshot.themeColor(),
+        snapshot.brandVisible(),
+        snapshot.stylePreset());
   }
 
   @Transactional
   public SendMessageResponse send(SendMessageRequest request) {
     PublicChatbotSnapshot snapshot =
         chatbotService.requireActiveSnapshot(request.chatbotPublicCode());
+        return handleMessage(snapshot, request);
+    }
+
+    @Transactional
+    public SendMessageResponse sendWithSnapshot(
+            PublicChatbotSnapshot snapshot, SendMessageRequest request) {
+        return handleMessage(snapshot, request);
+    }
+
+    private SendMessageResponse handleMessage(
+            PublicChatbotSnapshot snapshot, SendMessageRequest request) {
         planService.ensureTenantWithinLimit(snapshot.tenantId(), "messages", 2);
 
     Conversation conversation =
@@ -92,7 +105,7 @@ public class PublicChatService {
     visitorMessage.setStatus(MessageStatus.DELIVERED);
     visitorMessage.setContent(request.message());
     visitorMessage.setMetadataJson(toJson(Map.of("language", request.language())));
-    messageRepository.save(visitorMessage);
+    Message savedVisitorMessage = messageRepository.save(visitorMessage);
 
     FaqService.MatchResult faqMatch =
         faqService.match(
@@ -128,6 +141,7 @@ public class PublicChatService {
     return new SendMessageResponse(
         conversation.getId(),
         savedAssistantMessage.getId(),
+        String.valueOf(savedVisitorMessage.getId()),
         answer,
         sourceType,
         faqMatch.matched()
@@ -173,7 +187,12 @@ public class PublicChatService {
       String userAgent) {}
 
   public record InitConversationResponse(
-      Long conversationId, String anonymousVisitorId, String welcomeMessage, String themeColor) {}
+      Long conversationId,
+      String anonymousVisitorId,
+      String welcomeMessage,
+      String themeColor,
+      boolean brandVisible,
+      String stylePreset) {}
 
   public record SendMessageRequest(
       Long conversationId, String chatbotPublicCode, String language, String message) {}
@@ -181,6 +200,7 @@ public class PublicChatService {
   public record SendMessageResponse(
       Long conversationId,
       Long assistantMessageId,
+      String visitorMessageId,
       String answer,
       String sourceType,
       List<Citation> citations) {}
