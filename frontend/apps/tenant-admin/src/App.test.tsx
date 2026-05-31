@@ -9,7 +9,11 @@ vi.mock('@agentx/api-client', async () => {
   const actual = await vi.importActual<typeof import('@agentx/api-client')>('@agentx/api-client');
   return {
     ...actual,
+    addChatbotDeploymentDomain: vi.fn(),
+    deleteChatbotDeploymentDomain: vi.fn(),
     getChatbot: vi.fn(),
+    getChatbotDeploymentOverview: vi.fn(),
+    listChatbotDeploymentDomains: vi.fn(),
     listChatbots: vi.fn(),
     listModelDefinitions: vi.fn(),
     listModelProviders: vi.fn(),
@@ -23,6 +27,9 @@ const listChatbotsMock = vi.mocked(apiClient.listChatbots);
 const listModelProvidersMock = vi.mocked(apiClient.listModelProviders);
 const listModelDefinitionsMock = vi.mocked(apiClient.listModelDefinitions);
 const getChatbotMock = vi.mocked(apiClient.getChatbot);
+const getChatbotDeploymentOverviewMock = vi.mocked(apiClient.getChatbotDeploymentOverview);
+const listChatbotDeploymentDomainsMock = vi.mocked(apiClient.listChatbotDeploymentDomains);
+const addChatbotDeploymentDomainMock = vi.mocked(apiClient.addChatbotDeploymentDomain);
 const updateChatbotBehaviorMock = vi.mocked(apiClient.updateChatbotBehavior);
 
 const session = {
@@ -62,6 +69,35 @@ const chatbotDetail: apiClient.ChatbotDetail = {
   embeddingProviderCode: null,
   embeddingModelCode: null
 };
+
+const chatbotDeploymentOverview: apiClient.ChatbotDeploymentOverview = {
+  chatbotId: 101,
+  tenantId: 7,
+  chatbotPublicCode: 'billing-bot-public',
+  widgetScriptUrl: 'http://localhost:5173/widget/sdk.js',
+  chatPageUrl: 'http://localhost:5173/chat-page?bot=billing-bot-public',
+  widgetSnippet: '<script src="http://localhost:5173/widget/sdk.js"></script>',
+  whitelistCount: 1,
+  recentAccesses: [
+    {
+      id: 8001,
+      conversationId: 5001,
+      entryType: 'CHAT_PAGE',
+      domain: 'portal.agentx.test',
+      ipAddress: '127.0.0.1',
+      userAgent: 'Mozilla/5.0',
+      createdAt: '2026-05-26T13:00:00.000Z'
+    }
+  ]
+};
+
+const deploymentDomains: apiClient.ChatbotDeploymentDomain[] = [
+  {
+    id: 901,
+    domain: 'portal.agentx.test',
+    createdAt: '2026-05-26T12:00:00.000Z'
+  }
+];
 
 const modelProviders: apiClient.ModelProviderSummary[] = [
   {
@@ -174,6 +210,8 @@ describe('tenant-admin app', () => {
     listModelProvidersMock.mockResolvedValue(modelProviders);
     listModelDefinitionsMock.mockResolvedValue(modelDefinitions);
     getChatbotMock.mockResolvedValue(chatbotDetail);
+    getChatbotDeploymentOverviewMock.mockResolvedValue(chatbotDeploymentOverview);
+    listChatbotDeploymentDomainsMock.mockResolvedValue(deploymentDomains);
     updateChatbotBehaviorMock.mockImplementation(async (_token, _chatbotId, request) => ({
       ...chatbotDetail,
       fallbackMessage: request.fallbackMessage,
@@ -211,5 +249,52 @@ describe('tenant-admin app', () => {
     });
 
     expect(await screen.findByText('知识 Embedding：embed-provider / embedding-model-b')).toBeInTheDocument();
+  });
+
+  it('renders deployment details and adds whitelist domains', async () => {
+    seedSession();
+    listChatbotsMock.mockResolvedValue([chatbotSummary]);
+    listModelProvidersMock.mockResolvedValue(modelProviders);
+    listModelDefinitionsMock.mockResolvedValue(modelDefinitions);
+    getChatbotMock.mockResolvedValue(chatbotDetail);
+    getChatbotDeploymentOverviewMock.mockResolvedValue(chatbotDeploymentOverview);
+    listChatbotDeploymentDomainsMock.mockResolvedValue(deploymentDomains);
+    addChatbotDeploymentDomainMock.mockResolvedValue({
+      id: 902,
+      domain: 'app.agentx.test',
+      createdAt: '2026-05-26T12:05:00.000Z'
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Billing Bot' }));
+    fireEvent.click(await screen.findByRole('tab', { name: '渠道部署' }));
+
+    expect(await screen.findByText('部署面板')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue('<script src="http://localhost:5173/widget/sdk.js"></script>')).toBeInTheDocument();
+    expect((await screen.findAllByText('portal.agentx.test')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('最近部署访问')).toBeInTheDocument();
+    expect(await screen.findByText('#5001')).toBeInTheDocument();
+
+    listChatbotDeploymentDomainsMock.mockResolvedValueOnce([...deploymentDomains, {
+      id: 902,
+      domain: 'app.agentx.test',
+      createdAt: '2026-05-26T12:05:00.000Z'
+    }]);
+    getChatbotDeploymentOverviewMock.mockResolvedValueOnce({
+      ...chatbotDeploymentOverview,
+      whitelistCount: 2
+    });
+
+    fireEvent.change(screen.getByPlaceholderText('例如 app.agentx.test 或 https://app.agentx.test/help'), {
+      target: { value: 'https://app.agentx.test/help' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: '添加域名' }));
+
+    await waitFor(() => {
+      expect(addChatbotDeploymentDomainMock).toHaveBeenCalledWith('tenant-session-token', 101, 'https://app.agentx.test/help');
+    });
+
+    expect(await screen.findByText('app.agentx.test')).toBeInTheDocument();
   });
 });

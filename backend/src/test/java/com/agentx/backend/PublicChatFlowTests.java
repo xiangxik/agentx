@@ -185,6 +185,109 @@ class PublicChatFlowTests {
   }
 
       @Test
+      void publicChatInitRejectsDomainOutsideWhitelist() throws Exception {
+      String tenantResponse =
+        mockMvc
+          .perform(
+            post("/api/admin/tenants")
+              .with(user("admin@example.com").roles("SUPER_ADMIN"))
+              .contentType(MediaType.APPLICATION_JSON)
+              .content(
+                """
+                {
+                  "code":"tenant-domain-guard",
+                  "name":"Tenant Domain Guard",
+                  "contactName":"Alice",
+                  "contactEmail":"alice-domain@tenant.test",
+                  "notes":"domain guard tenant",
+                  "adminEmail":"owner-domain@tenant.test",
+                  "adminDisplayName":"Owner Domain",
+                  "adminPassword":"Tenant123!"
+                }
+                """))
+          .andExpect(status().isOk())
+          .andReturn()
+          .getResponse()
+          .getContentAsString();
+
+      long tenantId = JsonTestUtils.readLong(tenantResponse, "id");
+
+      String chatbotResponse =
+        mockMvc
+          .perform(
+            post("/api/admin/chatbots")
+              .with(user(authUser("owner-domain@tenant.test")))
+              .contentType(MediaType.APPLICATION_JSON)
+              .content(
+                """
+                {
+                  "tenantId":%d,
+                  "name":"Guard Bot",
+                  "description":"guard",
+                  "language":"zh-CN",
+                  "status":"ACTIVE"
+                }
+                """
+                  .formatted(tenantId)))
+          .andExpect(status().isOk())
+          .andReturn()
+          .getResponse()
+          .getContentAsString();
+
+      long chatbotId = JsonTestUtils.readLong(chatbotResponse, "id");
+      String publicCode = JsonTestUtils.readText(chatbotResponse, "publicCode");
+
+      mockMvc
+        .perform(
+          post("/api/admin/chatbots/{chatbotId}/deployment/domains", chatbotId)
+            .with(user(authUser("owner-domain@tenant.test")))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(
+              """
+              {
+                "domain":"allowed.agentx.test"
+              }
+              """))
+        .andExpect(status().isOk());
+
+      mockMvc
+        .perform(
+          post("/api/public/chat/init")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(
+              """
+              {
+                "chatbotPublicCode":"%s",
+                "entryType":"CHAT_PAGE",
+                "domain":"blocked.agentx.test",
+                "ipAddress":"127.0.0.1",
+                "userAgent":"JUnit"
+              }
+              """
+                .formatted(publicCode)))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("DOMAIN_NOT_ALLOWED"));
+
+      mockMvc
+        .perform(
+          post("/api/public/chat/init")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(
+              """
+              {
+                "chatbotPublicCode":"%s",
+                "entryType":"CHAT_PAGE",
+                "domain":"allowed.agentx.test",
+                "ipAddress":"127.0.0.1",
+                "userAgent":"JUnit"
+              }
+              """
+                .formatted(publicCode)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.conversationId").isNumber());
+      }
+
+      @Test
       void publicChatUsesModelReplyWhenDirectModelIsEnabled() throws Exception {
         HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
         server.createContext(

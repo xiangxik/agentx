@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>AgentX Widget SDK E2E Demo</title>
+    <script src="../dist/sdk.js"></script>
+    <script src="https://unpkg.com/react@19.1.0/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@19.1.0/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@agentx/chat-core/dist/chat-core.umd.js"></script>
+    <style>
+      body { background: #f8fafc; }
+      #demo-root { margin: 40px auto; max-width: 420px; min-height: 480px; background: #fff; border-radius: 12px; box-shadow: 0 8px 32px rgba(15,23,42,0.10); }
+    </style>
+  </head>
+  <body>
+    <div id="demo-root"></div>
+    <script>
+      window.AgentXChatbot.init({
+        target: '#demo-root',
+        bot: 'demo-bot',
+        title: 'SDK Demo',
+        subtitle: '静态 HTML 挂载',
+        apiBaseUrl: 'http://localhost:8080',
+        entryType: 'WIDGET'
+      });
+    </script>
+  </body>
+</html>

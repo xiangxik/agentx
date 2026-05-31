@@ -49,16 +49,37 @@ describe('chat-core', () => {
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
     sockets = [];
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        conversationId: 123,
-        anonymousVisitorId: 'visitor-1',
-        welcomeMessage: '欢迎来到 AgentX。',
-        themeColor: '#2563eb',
-        brandVisible: true,
-        stylePreset: 'executive'
-      })
+    fetchMock.mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/api/public/chatbots/')) {
+        return {
+          ok: true,
+          json: async () => ({
+            chatbotId: 1,
+            tenantId: 1,
+            name: 'Support Bot',
+            language: 'zh-CN',
+            status: 'ACTIVE',
+            publicCode: 'demo-bot',
+            themeColor: '#2563eb',
+            welcomeMessage: '欢迎来到 AgentX。',
+            brandVisible: true,
+            stylePreset: 'executive'
+          })
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          conversationId: 123,
+          anonymousVisitorId: 'visitor-1',
+          welcomeMessage: '欢迎来到 AgentX。',
+          themeColor: '#2563eb',
+          brandVisible: true,
+          stylePreset: 'executive'
+        })
+      };
     });
   });
 
@@ -71,8 +92,14 @@ describe('chat-core', () => {
   it('renders welcome message from init api', async () => {
     render(<ChatSurface title="Chat" subtitle="subtitle" chatbotPublicCode="demo-bot" entryType="CHAT_PAGE" />);
     await waitFor(() => expect(screen.getByText('欢迎来到 AgentX。')).toBeInTheDocument());
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(sockets[0]?.url).toContain('/ws/public/chat');
+  });
+
+  it('uses snapshot metadata when title and subtitle are omitted', async () => {
+    render(<ChatSurface chatbotPublicCode="demo-bot" entryType="WIDGET" />);
+
+    await waitFor(() => expect(screen.getByLabelText(/Support Bot 嵌入式组件 · zh-CN/)).toBeInTheDocument());
   });
 
   it('renders assistant citations after websocket send', async () => {
@@ -134,16 +161,37 @@ describe('chat-core', () => {
   });
 
   it('applies style preset metadata from init api', async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        conversationId: 123,
-        anonymousVisitorId: 'visitor-1',
-        welcomeMessage: '欢迎来到 AgentX。',
-        themeColor: '#166534',
-        brandVisible: false,
-        stylePreset: 'forest'
-      })
+    fetchMock.mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/api/public/chatbots/')) {
+        return {
+          ok: true,
+          json: async () => ({
+            chatbotId: 1,
+            tenantId: 1,
+            name: 'Support Bot',
+            language: 'zh-CN',
+            status: 'ACTIVE',
+            publicCode: 'demo-bot',
+            themeColor: '#166534',
+            welcomeMessage: '欢迎来到 AgentX。',
+            brandVisible: false,
+            stylePreset: 'forest'
+          })
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          conversationId: 123,
+          anonymousVisitorId: 'visitor-1',
+          welcomeMessage: '欢迎来到 AgentX。',
+          themeColor: '#166534',
+          brandVisible: false,
+          stylePreset: 'forest'
+        })
+      };
     });
 
     render(<ChatSurface title="Chat" subtitle="subtitle" chatbotPublicCode="demo-bot" entryType="CHAT_PAGE" />);

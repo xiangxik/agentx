@@ -1,14 +1,18 @@
-import { ChatSurface } from '@agentx/chat-core';
+import { ChatSurface, resolvePublicChatConfig } from '@agentx/chat-core';
 
 export function App() {
-  const chatbotPublicCode = new URLSearchParams(globalThis.location.search).get('bot') ?? 'demo-bot';
+  const config = resolvePublicChatConfig({
+    entryType: 'WIDGET',
+    fallbackBot: 'demo-bot'
+  });
 
   return (
     <ChatSurface
-      title="网站插件"
-      subtitle="后续会通过嵌入脚本 + 域名白名单初始化。"
-      chatbotPublicCode={chatbotPublicCode}
+      title={config.title}
+      subtitle={config.subtitle}
+      chatbotPublicCode={config.chatbotPublicCode}
       entryType="WIDGET"
+      apiBaseUrl={config.apiBaseUrl}
     />
   );
 }

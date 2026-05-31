@@ -265,6 +265,136 @@ class AdminControllersTests {
         .andExpect(jsonPath("$.status").value("DISABLED"));
   }
 
+      @Test
+      void tenantAdminCanManageDeploymentDomains() throws Exception {
+      String tenantResponse =
+        mockMvc
+          .perform(
+            post("/api/admin/tenants")
+              .with(user("admin@example.com").roles("SUPER_ADMIN"))
+              .contentType(MediaType.APPLICATION_JSON)
+              .content(
+                """
+                {
+                  "code":"tenant-deploy",
+                  "name":"Tenant Deploy",
+                  "contactName":"Dora",
+                  "contactEmail":"dora@tenant.test",
+                  "notes":"deployment tenant",
+                  "adminEmail":"owner-deploy@tenant.test",
+                  "adminDisplayName":"Owner Deploy",
+                  "adminPassword":"Tenant123!"
+                }
+                """))
+          .andExpect(status().isOk())
+          .andReturn()
+          .getResponse()
+          .getContentAsString();
+
+      long tenantId = JsonTestUtils.readLong(tenantResponse, "id");
+
+      String chatbotResponse =
+        mockMvc
+          .perform(
+            post("/api/admin/chatbots")
+              .with(user(authUser("owner-deploy@tenant.test")))
+              .contentType(MediaType.APPLICATION_JSON)
+              .content(
+                """
+                {
+                  "tenantId":%d,
+                  "name":"Deploy Bot",
+                  "description":"deployment",
+                  "language":"zh-CN",
+                  "status":"ACTIVE"
+                }
+                """
+                  .formatted(tenantId)))
+          .andExpect(status().isOk())
+          .andReturn()
+          .getResponse()
+          .getContentAsString();
+
+      long chatbotId = JsonTestUtils.readLong(chatbotResponse, "id");
+
+      mockMvc
+        .perform(
+          get("/api/admin/chatbots/{chatbotId}/deployment", chatbotId)
+            .with(user(authUser("owner-deploy@tenant.test"))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.chatbotId").value(chatbotId))
+        .andExpect(jsonPath("$.chatbotPublicCode").isNotEmpty())
+        .andExpect(jsonPath("$.chatPageUrl").value(org.hamcrest.Matchers.containsString("bot=")));
+
+      String domainResponse =
+        mockMvc
+          .perform(
+            post("/api/admin/chatbots/{chatbotId}/deployment/domains", chatbotId)
+              .with(user(authUser("owner-deploy@tenant.test")))
+              .contentType(MediaType.APPLICATION_JSON)
+              .content(
+                """
+                {
+                  "domain":"https://app.agentx.test/help"
+                }
+                """))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.domain").value("app.agentx.test"))
+          .andReturn()
+          .getResponse()
+          .getContentAsString();
+
+      long domainId = JsonTestUtils.readLong(domainResponse, "id");
+
+      mockMvc
+        .perform(
+          get("/api/admin/chatbots/{chatbotId}/deployment/domains", chatbotId)
+            .with(user(authUser("owner-deploy@tenant.test"))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].domain").value("app.agentx.test"));
+
+      String publicCode = JsonTestUtils.readText(chatbotResponse, "publicCode");
+
+      mockMvc
+        .perform(
+          post("/api/public/chat/init")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(
+              """
+              {
+                "chatbotPublicCode":"%s",
+                "entryType":"CHAT_PAGE",
+                "domain":"https://app.agentx.test/help",
+                "ipAddress":"127.0.0.1",
+                "userAgent":"AdminControllersTests"
+              }
+              """
+                .formatted(publicCode)))
+        .andExpect(status().isOk());
+
+      mockMvc
+        .perform(
+          get("/api/admin/chatbots/{chatbotId}/deployment", chatbotId)
+            .with(user(authUser("owner-deploy@tenant.test"))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.recentAccesses[0].entryType").value("CHAT_PAGE"))
+        .andExpect(jsonPath("$.recentAccesses[0].domain").value("app.agentx.test"))
+        .andExpect(jsonPath("$.recentAccesses[0].ipAddress").value("127.0.0.1"));
+
+      mockMvc
+        .perform(
+          delete("/api/admin/chatbots/{chatbotId}/deployment/domains/{domainId}", chatbotId, domainId)
+            .with(user(authUser("owner-deploy@tenant.test"))))
+        .andExpect(status().isOk());
+
+      mockMvc
+        .perform(
+          get("/api/admin/chatbots/{chatbotId}/deployment/domains", chatbotId)
+            .with(user(authUser("owner-deploy@tenant.test"))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$").isEmpty());
+      }
+
     @Test
     void superAdminCanManageModelProvidersAndDefinitions() throws Exception {
     String providerResponse =

@@ -47,16 +47,38 @@ describe('chatbot-widget app', () => {
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
     sockets.length = 0;
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        conversationId: 123,
-        anonymousVisitorId: 'visitor-1',
-        welcomeMessage: '欢迎来到 AgentX。',
-        themeColor: '#2563eb',
-        brandVisible: true,
-        stylePreset: 'executive'
-      })
+    window.history.pushState({}, '', '/');
+    fetchMock.mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/api/public/chatbots/')) {
+        return {
+          ok: true,
+          json: async () => ({
+            chatbotId: 101,
+            tenantId: 7,
+            name: '插件接待 Bot',
+            language: 'zh-CN',
+            status: 'ACTIVE',
+            publicCode: 'demo-bot',
+            themeColor: '#2563eb',
+            welcomeMessage: '欢迎来到 AgentX。',
+            brandVisible: true,
+            stylePreset: 'executive'
+          })
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          conversationId: 123,
+          anonymousVisitorId: 'visitor-1',
+          welcomeMessage: '欢迎来到 AgentX。',
+          themeColor: '#2563eb',
+          brandVisible: true,
+          stylePreset: 'executive'
+        })
+      };
     });
   });
 
@@ -68,8 +90,8 @@ describe('chatbot-widget app', () => {
 
   it('renders widget title', async () => {
     render(<App />);
-    expect(screen.getByText('网站插件')).toBeInTheDocument();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(await screen.findByLabelText(/插件接待 Bot 嵌入式组件 · zh-CN/)).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(sockets[0]?.url).toContain('/ws/public/chat'));
   });
 
@@ -78,7 +100,7 @@ describe('chatbot-widget app', () => {
 
     await waitFor(() => expect(screen.getByText('欢迎来到 AgentX。')).toBeInTheDocument());
     sockets[0].open();
-    await waitFor(() => expect(screen.getAllByText('WebSocket 已连接').length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText('已连接').length).toBeGreaterThan(0));
 
     fireEvent.change(screen.getByRole('textbox'), {
       target: { value: '退款规则是什么？' }

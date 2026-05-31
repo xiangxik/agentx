@@ -3,6 +3,14 @@ import { useEffect, useRef, useState } from 'react';
 type MessageStatus = 'sent' | 'pending' | 'failed';
 type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'failed';
 type StylePreset = 'executive' | 'slate' | 'heritage' | 'forest' | 'graphite';
+export type PublicEntryType = 'CHAT_PAGE' | 'WIDGET';
+
+type GlobalInitConfig = {
+  bot?: string;
+  title?: string;
+  subtitle?: string;
+  apiBaseUrl?: string;
+};
 
 export interface ChatMessage {
   id: string;
@@ -15,10 +23,11 @@ export interface ChatMessage {
 }
 
 interface ChatSurfaceProps {
-  title: string;
-  subtitle: string;
+  title?: string;
+  subtitle?: string;
   chatbotPublicCode: string;
-  entryType: 'CHAT_PAGE' | 'WIDGET';
+  entryType: PublicEntryType;
+  apiBaseUrl?: string;
 }
 
 interface InitResponse {
@@ -28,6 +37,26 @@ interface InitResponse {
   themeColor: string;
   brandVisible?: boolean;
   stylePreset?: string;
+}
+
+interface PublicSnapshotResponse {
+  chatbotId: number;
+  tenantId: number;
+  name: string;
+  language: string;
+  status: string;
+  publicCode: string;
+  themeColor: string;
+  welcomeMessage: string;
+  brandVisible: boolean;
+  stylePreset: string;
+}
+
+export interface ResolvedPublicChatConfig {
+  chatbotPublicCode: string;
+  title?: string;
+  subtitle?: string;
+  apiBaseUrl?: string;
 }
 
 interface ApiErrorResponse {
@@ -80,9 +109,42 @@ interface SurfaceTheme {
 const QUICK_PROMPTS = ['退款规则', '在线时间', '人工协助'];
 const DEFAULT_THEME_COLOR = '#2563eb';
 
-const resolveApiBaseUrl = () =>
+const resolveApiBaseUrl = (apiBaseUrl?: string) =>
+  apiBaseUrl ??
   (globalThis as typeof globalThis & { __AGENTX_API_BASE_URL__?: string }).__AGENTX_API_BASE_URL__ ??
   'http://localhost:8080';
+
+function readGlobalInitConfig() {
+  const globalConfig = (globalThis as typeof globalThis & { __AGENTX_CHAT_INIT__?: GlobalInitConfig }).__AGENTX_CHAT_INIT__;
+  return globalConfig ?? {};
+}
+
+function defaultTitle(entryType: PublicEntryType) {
+  return entryType === 'CHAT_PAGE' ? 'AgentX 智能接待中心' : '网站插件';
+}
+
+function defaultSubtitle(entryType: PublicEntryType) {
+  return entryType === 'CHAT_PAGE'
+    ? '面向官网与活动页的正式访客入口。'
+    : '嵌入式访客入口，支持 FAQ、知识库检索与人工协助承接。';
+}
+
+export function resolvePublicChatConfig(options: {
+  entryType: PublicEntryType;
+  fallbackBot: string;
+  fallbackTitle?: string;
+  fallbackSubtitle?: string;
+}): ResolvedPublicChatConfig {
+  const searchParams = new URLSearchParams(globalThis.location?.search ?? '');
+  const globalConfig = readGlobalInitConfig();
+
+  return {
+    chatbotPublicCode: searchParams.get('bot') ?? globalConfig.bot ?? options.fallbackBot,
+    title: searchParams.get('title') ?? globalConfig.title ?? options.fallbackTitle,
+    subtitle: searchParams.get('subtitle') ?? globalConfig.subtitle ?? options.fallbackSubtitle,
+    apiBaseUrl: searchParams.get('apiBaseUrl') ?? globalConfig.apiBaseUrl ?? undefined
+  };
+}
 
 function resolveWebSocketUrl(apiBaseUrl: string, chatbotPublicCode: string, conversationId: number) {
   const target = new URL(apiBaseUrl, globalThis.location?.origin ?? 'http://localhost:8080');
@@ -103,6 +165,10 @@ function mapChatError(code: string | undefined, fallback: string) {
       return '当前租户的消息额度已达上限，暂时无法继续发送。';
     case 'CHATBOT_NOT_ACTIVE':
       return '当前 Chatbot 未启用，暂时无法对外提供服务。';
+    case 'TENANT_NOT_ACTIVE':
+      return '当前租户未启用，暂时无法对外提供服务。';
+    case 'DOMAIN_NOT_ALLOWED':
+      return '当前访问域名未加入白名单，暂时无法初始化会话。';
     default:
       return fallback;
   }
@@ -115,7 +181,7 @@ function formatClock(date = new Date()) {
   }).format(date);
 }
 
-function createClientMessageId() {
+function createClientMessageId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
@@ -431,7 +497,7 @@ function VisitorAvatar({ themeColor }: { themeColor: string }) {
   );
 }
 
-export function ChatSurface({ title, subtitle, chatbotPublicCode, entryType }: ChatSurfaceProps) {
+export function ChatSurface({ title, subtitle, chatbotPublicCode, entryType, apiBaseUrl }: ChatSurfaceProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [conversationId, setConversationId] = useState<number | null>(null);
@@ -445,13 +511,19 @@ export function ChatSurface({ title, subtitle, chatbotPublicCode, entryType }: C
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('idle');
   const [retrySeed, setRetrySeed] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(() => globalThis.innerWidth || 1280);
+  const [snapshot, setSnapshot] = useState<PublicSnapshotResponse | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
-  const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const theme = resolveSurfaceTheme(stylePreset, themeColor);
   const connectionAppearance = connectionTone(connectionStatus, themeColor);
   const isCompact = viewportWidth < 1080;
   const isPhone = viewportWidth < 720;
+  const resolvedTitle = title?.trim() || snapshot?.name || defaultTitle(entryType);
+  const resolvedSubtitle =
+    subtitle?.trim() ||
+    (snapshot ? `${entryType === 'CHAT_PAGE' ? '公开聊天页' : '嵌入式组件'} · ${snapshot.language}` : defaultSubtitle(entryType));
+  const resolvedApiBaseUrl = resolveApiBaseUrl(apiBaseUrl);
 
   useEffect(() => {
     const handleResize = () => setViewportWidth(globalThis.innerWidth || 1280);
@@ -479,10 +551,40 @@ export function ChatSurface({ title, subtitle, chatbotPublicCode, entryType }: C
     setBrandVisible(true);
     setStylePreset('executive');
     setConnectionStatus('idle');
+    setSnapshot(null);
+
+    const loadSnapshot = async () => {
+      try {
+        const response = await fetch(
+          `${resolvedApiBaseUrl}/api/public/chatbots/${encodeURIComponent(chatbotPublicCode)}/snapshot`,
+          {
+            signal: controller.signal
+          }
+        );
+
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = (await response.json()) as PublicSnapshotResponse;
+        if (cancelled) {
+          return;
+        }
+
+        setSnapshot(payload);
+        setThemeColor(payload.themeColor || DEFAULT_THEME_COLOR);
+        setBrandVisible(payload.brandVisible ?? true);
+        setStylePreset(normalizeStylePreset(payload.stylePreset));
+      } catch (snapshotError) {
+        if (snapshotError instanceof DOMException && snapshotError.name === 'AbortError') {
+          return;
+        }
+      }
+    };
 
     const initConversation = async () => {
       try {
-        const response = await fetch(`${resolveApiBaseUrl()}/api/public/chat/init`, {
+        const response = await fetch(`${resolvedApiBaseUrl}/api/public/chat/init`, {
           method: 'POST',
           signal: controller.signal,
           headers: {
@@ -538,13 +640,14 @@ export function ChatSurface({ title, subtitle, chatbotPublicCode, entryType }: C
       }
     };
 
+    void loadSnapshot();
     void initConversation();
 
     return () => {
       cancelled = true;
       controller.abort();
     };
-  }, [chatbotPublicCode, entryType]);
+  }, [chatbotPublicCode, entryType, resolvedApiBaseUrl]);
 
   useEffect(() => {
     if (!conversationId) {
@@ -554,7 +657,7 @@ export function ChatSurface({ title, subtitle, chatbotPublicCode, entryType }: C
     let disposed = false;
     setConnectionStatus('connecting');
 
-    const socket = new WebSocket(resolveWebSocketUrl(resolveApiBaseUrl(), chatbotPublicCode, conversationId));
+    const socket = new WebSocket(resolveWebSocketUrl(resolvedApiBaseUrl, chatbotPublicCode, conversationId));
     socketRef.current = socket;
 
     socket.onopen = () => {
@@ -582,7 +685,7 @@ export function ChatSurface({ title, subtitle, chatbotPublicCode, entryType }: C
         setError(payload.errorMessage ?? '消息发送失败');
         setMessages((current) =>
           current.map((message) =>
-            message.id === payload.clientMessageId ? { ...message, status: 'failed' } : message
+            message.id === payload.clientMessageId ? { ...message, status: 'failed' as const } : message
           )
         );
         return;
@@ -596,7 +699,7 @@ export function ChatSurface({ title, subtitle, chatbotPublicCode, entryType }: C
             ? {
                 ...message,
                 id: payload.clientMessageId ?? message.id,
-                status: 'sent'
+                status: 'sent' as const
               }
             : message
         );
@@ -634,7 +737,7 @@ export function ChatSurface({ title, subtitle, chatbotPublicCode, entryType }: C
       setIsLoading(false);
       setMessages((current) =>
         current.map((message) =>
-          message.status === 'pending' ? { ...message, status: 'failed' } : message
+          message.status === 'pending' ? { ...message, status: 'failed' as const } : message
         )
       );
 
@@ -655,7 +758,7 @@ export function ChatSurface({ title, subtitle, chatbotPublicCode, entryType }: C
         socketRef.current = null;
       }
     };
-  }, [chatbotPublicCode, conversationId, retrySeed]);
+  }, [chatbotPublicCode, conversationId, resolvedApiBaseUrl, retrySeed]);
 
   const canSend =
     Boolean(draft.trim()) &&
@@ -664,7 +767,7 @@ export function ChatSurface({ title, subtitle, chatbotPublicCode, entryType }: C
     !isLoading &&
     connectionStatus === 'connected';
 
-  const submitMessage = (content: string, messageId = createClientMessageId()) => {
+  const submitMessage = (content: string, messageId: string = createClientMessageId()) => {
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN || !conversationId) {
       setError('WebSocket 尚未连接，暂时无法发送消息。');
@@ -719,7 +822,7 @@ export function ChatSurface({ title, subtitle, chatbotPublicCode, entryType }: C
           '"IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif'
       }}
     >
-      <div style={{ maxWidth: 980, margin: '0 auto' }} aria-label={subtitle ? `${title} ${subtitle}` : title}>
+      <div style={{ maxWidth: 980, margin: '0 auto' }} aria-label={resolvedSubtitle ? `${resolvedTitle} ${resolvedSubtitle}` : resolvedTitle}>
         <section
           style={{
             overflow: 'hidden',

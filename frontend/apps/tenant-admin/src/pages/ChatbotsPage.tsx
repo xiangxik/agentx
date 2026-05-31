@@ -4,15 +4,21 @@ import { useEffect, useState } from 'react';
 import { Input, Select } from 'antd';
 import { ActionButton, DetailModal, ListSection, ListTable, ModalActionBar, NoticeBanner, PageStack, RowActionBar, RowActionButton, SectionHeader, SelectionCardButton, StatusTag, SurfaceCard, TableLinkButton, WorkspaceTabs } from '@agentx/admin-ui';
 import {
+  addChatbotDeploymentDomain,
   ApiRequestError,
   copyChatbot,
   createChatbot,
+  deleteChatbotDeploymentDomain,
   deleteChatbot,
   getChatbot,
+  getChatbotDeploymentOverview,
+  listChatbotDeploymentDomains,
   listChatbots,
   listModelDefinitions,
   listModelProviders,
   type AuthSession,
+  type ChatbotDeploymentDomain,
+  type ChatbotDeploymentOverview,
   type ChatbotDetail,
   type ChatbotSummary,
   type ModelDefinitionSummary,
@@ -48,6 +54,10 @@ export function ChatbotsPage({ session }: { session: AuthSession }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [chatbotDetail, setChatbotDetail] = useState<ChatbotDetail | null>(null);
+  const [deploymentOverview, setDeploymentOverview] = useState<ChatbotDeploymentOverview | null>(null);
+  const [deploymentDomains, setDeploymentDomains] = useState<ChatbotDeploymentDomain[]>([]);
+  const [deploymentDomainInput, setDeploymentDomainInput] = useState('');
+  const [deploymentLoading, setDeploymentLoading] = useState(false);
   const [createForm, setCreateForm] = useState<ChatbotFormState>(emptyChatbotForm(tenantId));
   const [editForm, setEditForm] = useState<UpdateChatbotRequest>({
     name: '',
@@ -125,6 +135,8 @@ export function ChatbotsPage({ session }: { session: AuthSession }) {
 
   useEffect(() => {
     if (!selectedChatbot) {
+      setDeploymentOverview(null);
+      setDeploymentDomains([]);
       return;
     }
 
@@ -157,6 +169,24 @@ export function ChatbotsPage({ session }: { session: AuthSession }) {
         });
       })
       .catch(() => setChatbotDetail(null));
+  }, [selectedChatbot, token]);
+
+  useEffect(() => {
+    if (!selectedChatbot) {
+      return;
+    }
+
+    setDeploymentLoading(true);
+    void Promise.all([
+      getChatbotDeploymentOverview(token, selectedChatbot.id),
+      listChatbotDeploymentDomains(token, selectedChatbot.id)
+    ])
+      .then(([overview, domains]) => {
+        setDeploymentOverview(overview);
+        setDeploymentDomains(domains);
+      })
+      .catch((error) => setErrorMessage(error instanceof Error ? error.message : '部署信息加载失败。'))
+      .finally(() => setDeploymentLoading(false));
   }, [selectedChatbot, token]);
 
   const refreshChatbots = async (preferredId?: number) => {
@@ -345,6 +375,71 @@ export function ChatbotsPage({ session }: { session: AuthSession }) {
       setErrorMessage(error instanceof Error ? error.message : '机器人行为策略更新失败。');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const reloadDeploymentState = async (chatbotId: number) => {
+    const [overview, domains] = await Promise.all([
+      getChatbotDeploymentOverview(token, chatbotId),
+      listChatbotDeploymentDomains(token, chatbotId)
+    ]);
+    setDeploymentOverview(overview);
+    setDeploymentDomains(domains);
+  };
+
+  const handleAddDeploymentDomain = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedChatbot) {
+      return;
+    }
+
+    setSubmitting(true);
+    setErrorMessage(null);
+    setNotice(null);
+
+    try {
+      await addChatbotDeploymentDomain(token, selectedChatbot.id, deploymentDomainInput.trim());
+      await reloadDeploymentState(selectedChatbot.id);
+      setDeploymentDomainInput('');
+      setNotice('白名单域名已更新。');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : '白名单域名保存失败。');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteDeploymentDomain = async (domainId: number) => {
+    if (!selectedChatbot) {
+      return;
+    }
+
+    setSubmitting(true);
+    setErrorMessage(null);
+    setNotice(null);
+
+    try {
+      await deleteChatbotDeploymentDomain(token, selectedChatbot.id, domainId);
+      await reloadDeploymentState(selectedChatbot.id);
+      setNotice('白名单域名已移除。');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : '白名单域名删除失败。');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCopyDeploymentValue = async (value: string, label: string) => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
+      setNotice(`${label} 已准备好，可手动复制。`);
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(value);
+      setNotice(`${label} 已复制。`);
+    } catch {
+      setNotice(`${label} 已准备好，可手动复制。`);
     }
   };
 
@@ -645,6 +740,80 @@ export function ChatbotsPage({ session }: { session: AuthSession }) {
                         <Select value={behaviorForm.allowHandoff ? 'true' : 'false'} onChange={(value) => setBehaviorForm((current) => ({ ...current, allowHandoff: value === 'true' }))} style={{ width: '100%' }} options={[{ value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} />
                       </Field>
                     </FormCard>
+                  )
+                },
+                {
+                  key: 'deployment',
+                  label: '渠道部署',
+                  children: (
+                    <div style={{ display: 'grid', gap: 16 }}>
+                      <SurfaceCard title="部署面板" description="生成聊天页链接、嵌入脚本，并按 Chatbot 维度维护来源域名白名单。">
+                        <div style={{ display: 'grid', gap: 12, color: '#334155' }}>
+                          <div>公开码：{deploymentOverview?.chatbotPublicCode ?? selectedChatbot.publicCode}</div>
+                          <div>聊天页：{deploymentOverview?.chatPageUrl ?? `http://localhost:5173/chat-page?bot=${selectedChatbot.publicCode}`}</div>
+                          <div>脚本地址：{deploymentOverview?.widgetScriptUrl ?? 'http://localhost:5173/widget/sdk.js'}</div>
+                          <div style={{ display: 'grid', gap: 6 }}>
+                            <strong style={{ color: '#0f172a' }}>嵌入代码</strong>
+                            <TextArea value={deploymentOverview?.widgetSnippet ?? ''} readOnly autoSize={{ minRows: 5 }} style={inputStyle(true)} />
+                          </div>
+                          <div>白名单域名数：{deploymentOverview?.whitelistCount ?? deploymentDomains.length}</div>
+                        </div>
+                        <ModalActionBar>
+                          <ActionButton disabled={submitting} onClick={() => void handleCopyDeploymentValue(deploymentOverview?.chatPageUrl ?? '', '聊天页链接')} variant="outline" tone="neutral">复制聊天页链接</ActionButton>
+                          <ActionButton disabled={submitting} onClick={() => void handleCopyDeploymentValue(deploymentOverview?.widgetSnippet ?? '', '嵌入代码')} tone="warning">复制嵌入代码</ActionButton>
+                        </ModalActionBar>
+                      </SurfaceCard>
+
+                      <SurfaceCard title="白名单域名" description="名单为空时默认放行；配置后仅允许名单内域名初始化会话。">
+                        <form onSubmit={handleAddDeploymentDomain} style={{ display: 'grid', gap: 14 }}>
+                          <Field label="新增域名">
+                            <Input value={deploymentDomainInput} onChange={(event) => setDeploymentDomainInput(event.target.value)} placeholder="例如 app.agentx.test 或 https://app.agentx.test/help" style={inputStyle()} />
+                          </Field>
+                          <ModalActionBar>
+                            <ActionButton htmlType="submit" disabled={submitting || deploymentLoading} tone="warning">添加域名</ActionButton>
+                            <ActionButton htmlType="button" variant="outline" tone="neutral" onClick={() => setDeploymentDomainInput('')}>清空</ActionButton>
+                          </ModalActionBar>
+                        </form>
+
+                        <div style={{ marginTop: 18 }}>
+                          <ListTable
+                            rowKey="id"
+                            dataSource={deploymentDomains}
+                            loading={deploymentLoading}
+                            emptyText="还没有域名白名单，当前默认为全部来源可访问。"
+                            columns={[
+                              { key: 'domain', title: '域名', render: (domain) => domain.domain },
+                              { key: 'createdAt', title: '添加时间', render: (domain) => new Date(domain.createdAt).toLocaleString('zh-CN') },
+                              {
+                                key: 'actions',
+                                title: '操作',
+                                render: (domain) => (
+                                  <RowActionBar>
+                                    <RowActionButton onClick={() => void handleDeleteDeploymentDomain(domain.id)} danger disabled={submitting}>移除</RowActionButton>
+                                  </RowActionBar>
+                                )
+                              }
+                            ]}
+                          />
+                        </div>
+                      </SurfaceCard>
+
+                      <SurfaceCard title="最近部署访问" description="展示最近 10 次成功初始化的访客入口，便于确认来源域名、入口类型和访问时间。">
+                        <ListTable
+                          rowKey="id"
+                          dataSource={deploymentOverview?.recentAccesses ?? []}
+                          loading={deploymentLoading}
+                          emptyText="还没有部署访问记录。"
+                          columns={[
+                            { key: 'entryType', title: '入口', render: (access) => access.entryType },
+                            { key: 'domain', title: '域名', render: (access) => access.domain ?? '未提供' },
+                            { key: 'ipAddress', title: 'IP', render: (access) => access.ipAddress ?? '未提供' },
+                            { key: 'createdAt', title: '访问时间', render: (access) => new Date(access.createdAt).toLocaleString('zh-CN') },
+                            { key: 'conversationId', title: '会话', render: (access) => access.conversationId ? `#${access.conversationId}` : '未生成' }
+                          ]}
+                        />
+                      </SurfaceCard>
+                    </div>
                   )
                 },
                 {

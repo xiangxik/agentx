@@ -57,7 +57,9 @@ public class PublicChatController {
   public Map<String, String> handleIllegalState(IllegalStateException exception) {
     if ("CONVERSATIONS_LIMIT_REACHED".equals(exception.getMessage())
         || "MESSAGES_LIMIT_REACHED".equals(exception.getMessage())
-        || "CHATBOT_NOT_ACTIVE".equals(exception.getMessage())) {
+        || "CHATBOT_NOT_ACTIVE".equals(exception.getMessage())
+        || "TENANT_NOT_ACTIVE".equals(exception.getMessage())
+        || "DOMAIN_NOT_ALLOWED".equals(exception.getMessage())) {
       return Map.of("code", exception.getMessage());
     }
 

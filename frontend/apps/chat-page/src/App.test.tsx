@@ -40,14 +40,38 @@ describe('chat-page app', () => {
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
     sockets.length = 0;
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        conversationId: 123,
-        anonymousVisitorId: 'visitor-1',
-        welcomeMessage: '欢迎来到 AgentX。',
-        themeColor: '#2563eb'
-      })
+    window.history.pushState({}, '', '/');
+    fetchMock.mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/api/public/chatbots/')) {
+        return {
+          ok: true,
+          json: async () => ({
+            chatbotId: 101,
+            tenantId: 7,
+            name: '官网接待 Bot',
+            language: 'zh-CN',
+            status: 'ACTIVE',
+            publicCode: '6370fe97-8eb7-4e23-83ea-66d4514c95c0',
+            themeColor: '#2563eb',
+            welcomeMessage: '欢迎来到 AgentX。',
+            brandVisible: true,
+            stylePreset: 'executive'
+          })
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          conversationId: 123,
+          anonymousVisitorId: 'visitor-1',
+          welcomeMessage: '欢迎来到 AgentX。',
+          themeColor: '#2563eb',
+          brandVisible: true,
+          stylePreset: 'executive'
+        })
+      };
     });
   });
 
@@ -59,9 +83,59 @@ describe('chat-page app', () => {
 
   it('renders title', async () => {
     render(<App />);
-    expect(screen.getByLabelText(/AgentX 智能接待中心/)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/官网接待 Bot 公开聊天页 · zh-CN/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('欢迎来到 AgentX。')).toBeInTheDocument());
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(sockets[0].url).toContain('chatbotPublicCode=6370fe97-8eb7-4e23-83ea-66d4514c95c0');
+  });
+
+  it('supports standardized global init config', async () => {
+    (globalThis as typeof globalThis & { __AGENTX_CHAT_INIT__?: Record<string, string> }).__AGENTX_CHAT_INIT__ = {
+      bot: 'global-bot',
+      title: 'Global Chat',
+      subtitle: 'Global Subtitle',
+      apiBaseUrl: 'https://api.agentx.test'
+    };
+
+    fetchMock.mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/api/public/chatbots/global-bot/snapshot')) {
+        return {
+          ok: true,
+          json: async () => ({
+            chatbotId: 101,
+            tenantId: 7,
+            name: 'Global Bot',
+            language: 'zh-CN',
+            status: 'ACTIVE',
+            publicCode: 'global-bot',
+            themeColor: '#2563eb',
+            welcomeMessage: '欢迎来到 AgentX。',
+            brandVisible: true,
+            stylePreset: 'executive'
+          })
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          conversationId: 123,
+          anonymousVisitorId: 'visitor-1',
+          welcomeMessage: '欢迎来到 AgentX。',
+          themeColor: '#2563eb',
+          brandVisible: true,
+          stylePreset: 'executive'
+        })
+      };
+    });
+
+    render(<App />);
+
+    expect(await screen.findByLabelText(/Global Chat Global Subtitle/)).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('https://api.agentx.test/api/public/chatbots/global-bot/snapshot', expect.any(Object)));
+    await waitFor(() => expect(sockets[0].url).toContain('wss://api.agentx.test/ws/public/chat'));
+
+    delete (globalThis as typeof globalThis & { __AGENTX_CHAT_INIT__?: Record<string, string> }).__AGENTX_CHAT_INIT__;
   });
 });

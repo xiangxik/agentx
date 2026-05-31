@@ -9,6 +9,7 @@ import com.agentx.backend.conversation.domain.Message;
 import com.agentx.backend.conversation.domain.MessageRepository;
 import com.agentx.backend.conversation.domain.MessageRole;
 import com.agentx.backend.conversation.domain.MessageStatus;
+import com.agentx.backend.deployment.application.DeploymentChannelService;
 import com.agentx.backend.faq.application.FaqService;
 import com.agentx.backend.knowledge.application.KnowledgeRetrievalService;
 import com.agentx.backend.model.application.ModelAnswerService;
@@ -27,6 +28,7 @@ public class PublicChatService {
   private final ChatbotService chatbotService;
   private final ConversationRepository conversationRepository;
   private final MessageRepository messageRepository;
+    private final DeploymentChannelService deploymentChannelService;
   private final FaqService faqService;
     private final KnowledgeRetrievalService knowledgeRetrievalService;
     private final ModelAnswerService modelAnswerService;
@@ -37,6 +39,7 @@ public class PublicChatService {
       ChatbotService chatbotService,
       ConversationRepository conversationRepository,
       MessageRepository messageRepository,
+            DeploymentChannelService deploymentChannelService,
       FaqService faqService,
             KnowledgeRetrievalService knowledgeRetrievalService,
             ModelAnswerService modelAnswerService,
@@ -45,6 +48,7 @@ public class PublicChatService {
     this.chatbotService = chatbotService;
     this.conversationRepository = conversationRepository;
     this.messageRepository = messageRepository;
+        this.deploymentChannelService = deploymentChannelService;
     this.faqService = faqService;
     this.knowledgeRetrievalService = knowledgeRetrievalService;
         this.modelAnswerService = modelAnswerService;
@@ -54,6 +58,7 @@ public class PublicChatService {
 
   @Transactional
   public InitConversationResponse init(InitConversationRequest request) {
+        deploymentChannelService.validatePublicAccess(request.chatbotPublicCode(), request.domain());
     PublicChatbotSnapshot snapshot =
         chatbotService.requireActiveSnapshot(request.chatbotPublicCode());
         planService.ensureTenantWithinLimit(snapshot.tenantId(), "conversations", 1);
@@ -73,6 +78,14 @@ public class PublicChatService {
                 "chatbotPublicCode", snapshot.publicCode(),
                 "chatbotName", snapshot.name())));
     Conversation saved = conversationRepository.save(conversation);
+    deploymentChannelService.recordAccess(
+        snapshot.tenantId(),
+        snapshot.chatbotId(),
+        saved.getId(),
+        request.entryType(),
+        request.domain(),
+        request.ipAddress(),
+        request.userAgent());
     return new InitConversationResponse(
         saved.getId(),
         saved.getAnonymousVisitorId(),

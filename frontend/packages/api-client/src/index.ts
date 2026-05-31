@@ -318,6 +318,33 @@ export interface UpdateChatbotBehaviorRequest {
   embeddingModelCode?: string;
 }
 
+export interface ChatbotDeploymentOverview {
+  chatbotId: number;
+  tenantId: number;
+  chatbotPublicCode: string;
+  widgetScriptUrl: string;
+  chatPageUrl: string;
+  widgetSnippet: string;
+  whitelistCount: number;
+  recentAccesses: ChatbotDeploymentAccess[];
+}
+
+export interface ChatbotDeploymentDomain {
+  id: number;
+  domain: string;
+  createdAt: string;
+}
+
+export interface ChatbotDeploymentAccess {
+  id: number;
+  conversationId: number | null;
+  entryType: string;
+  domain: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
 export interface FaqSummary {
   id: number;
   tenantId: number;
@@ -903,6 +930,47 @@ export async function updateChatbotStatus(
     path: `/api/admin/chatbots/${chatbotId}/status`,
     method: 'PATCH',
     body: { status },
+    token
+  });
+}
+
+export async function getChatbotDeploymentOverview(
+  token: string,
+  chatbotId: number
+): Promise<ChatbotDeploymentOverview> {
+  return apiRequest<ChatbotDeploymentOverview>({
+    path: `/api/admin/chatbots/${chatbotId}/deployment`,
+    token
+  });
+}
+
+export async function listChatbotDeploymentDomains(
+  token: string,
+  chatbotId: number
+): Promise<ChatbotDeploymentDomain[]> {
+  return apiRequest<ChatbotDeploymentDomain[]>({
+    path: `/api/admin/chatbots/${chatbotId}/deployment/domains`,
+    token
+  });
+}
+
+export async function addChatbotDeploymentDomain(
+  token: string,
+  chatbotId: number,
+  domain: string
+): Promise<ChatbotDeploymentDomain> {
+  return apiRequest<ChatbotDeploymentDomain, { domain: string }>({
+    path: `/api/admin/chatbots/${chatbotId}/deployment/domains`,
+    method: 'POST',
+    body: { domain },
+    token
+  });
+}
+
+export async function deleteChatbotDeploymentDomain(token: string, chatbotId: number, domainId: number): Promise<void> {
+  await apiRequest<unknown>({
+    path: `/api/admin/chatbots/${chatbotId}/deployment/domains/${domainId}`,
+    method: 'DELETE',
     token
   });
 }
